@@ -1,0 +1,883 @@
+{
+  "content_id": "transistor_20260917_e319",
+  "source": {
+    "platform": "xiaoyuzhoufm",
+    "title": "对话 319｜硅谷AI高手们，正在操作几百个AI同时上班｜Github七万星Orca创始人津晶对话",
+    "url": "https://www.xiaoyuzhoufm.com/episode/6aad442b6ff9869113afa32a",
+    "audio_url": "https://media.xyzcdn.net/6934fbe84ef12f9fe94eed5f/liJk7y6bXWCKDvFOGZ6jnH1MzQrz.mp3",
+    "duration_sec": 4013,
+    "published_at": "2026-09-17",
+    "series": "课代表立正",
+    "episode_no": "319"
+  },
+  "people": [
+    {
+      "person_id": "jin-jing",
+      "name": "津晶",
+      "role": "guest",
+      "identity": "Orca联合创始人",
+      "org": [
+        "Orca",
+        "Google(前)"
+      ],
+      "links": [
+        "https://github.com/stablyai/orca"
+      ],
+      "first_appeared_in": "transistor_20260917_e319"
+    },
+    {
+      "person_id": "sun-yuzheng",
+      "name": "孙煜征（立正）",
+      "role": "host",
+      "identity": "康奈尔经济学博士、Superlinear Academy创始人",
+      "org": [
+        "Superlinear Academy"
+      ],
+      "links": [
+        "https://www.lizheng.ai/"
+      ],
+      "first_appeared_in": "transistor_20260917_e319"
+    }
+  ],
+  "entities": [
+    {
+      "entity_id": "orca",
+      "type": "product",
+      "name": "Orca",
+      "url": "https://github.com/stablyai/orca",
+      "context": "讨论对象：Agent IDE"
+    },
+    {
+      "entity_id": "claude-code",
+      "type": "product",
+      "name": "Claude Code",
+      "context": "被Orca集成调度的harness"
+    },
+    {
+      "entity_id": "codex",
+      "type": "product",
+      "name": "Codex",
+      "context": "被Orca集成调度的harness"
+    },
+    {
+      "entity_id": "stably",
+      "type": "product",
+      "name": "Stably",
+      "context": "嘉宾前一个创业项目（AI测试agent）"
+    },
+    {
+      "entity_id": "yc",
+      "type": "company",
+      "name": "Y Combinator",
+      "context": "嘉宾创业路径"
+    },
+    {
+      "entity_id": "mom-test",
+      "type": "book",
+      "name": "The Mom Test",
+      "context": "用户访谈方法论来源"
+    },
+    {
+      "entity_id": "superlinear-academy",
+      "type": "company",
+      "name": "Superlinear Academy",
+      "context": "host社区（片中插播）"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "c01",
+      "speaker": "jin-jing",
+      "timestamp": "01:03",
+      "type": "方法论",
+      "statement": "ADE价值=集成性+高agent并行+对Claude Code/Codex中立，用户无需更换harness",
+      "relations": [
+        {
+          "type": "supports",
+          "target": "c02",
+          "note": "c02不与工具对立支撑c01的中立性"
+        }
+      ],
+      "end": "06:03"
+    },
+    {
+      "claim_id": "c02",
+      "speaker": "jin-jing",
+      "timestamp": "06:29",
+      "type": "方法论",
+      "statement": "不与现有工具对立是刻意设计：CLI用户远多于GUI，逼用户换界面会拖慢自己的迭代速度",
+      "relations": [
+        {
+          "type": "supports",
+          "target": "c01",
+          "note": "支撑c01中立性设计"
+        }
+      ],
+      "end": "08:24"
+    },
+    {
+      "claim_id": "c03",
+      "speaker": "jin-jing",
+      "timestamp": "08:24",
+      "type": "方法论",
+      "statement": "400个worktree靠跨harness统一agent status分诊（working/阻塞/待review）管理",
+      "relations": [
+        {
+          "type": "precondition",
+          "target": "c06",
+          "note": "统一status是三层管理法的前提"
+        }
+      ],
+      "end": "10:09"
+    },
+    {
+      "claim_id": "c04",
+      "speaker": "jin-jing",
+      "timestamp": "11:27",
+      "type": "经验教训",
+      "statement": "'Claude/Codex没我们做得好'非长久壁垒，真壁垒是日更迭代速度+自己是最重度用户",
+      "relations": [
+        {
+          "type": "supported_by",
+          "target": "c05",
+          "note": "c05大厂incentive冲突支撑真壁垒判断"
+        },
+        {
+          "type": "related",
+          "target": "c32",
+          "note": "c32回应c05"
+        }
+      ],
+      "end": "13:24"
+    },
+    {
+      "claim_id": "c05",
+      "speaker": "jin-jing",
+      "timestamp": "13:24",
+      "type": "判断预测",
+      "statement": "大厂incentive不align：Claude/Codex利益在lock-in，与中立集成层冲突",
+      "relations": [
+        {
+          "type": "supports",
+          "target": "c04",
+          "note": "支撑真壁垒判断"
+        },
+        {
+          "type": "contrasted",
+          "target": "c32",
+          "note": "被c32回应"
+        }
+      ],
+      "end": "16:59"
+    },
+    {
+      "claim_id": "c06",
+      "speaker": "jin-jing",
+      "timestamp": "22:01",
+      "type": "方法论",
+      "statement": "管海量agent第一层：索引式搜索，session标题/worktree名/ticket关键词全入索引",
+      "relations": [
+        {
+          "type": "followed_by",
+          "target": "c07",
+          "note": "递进为层2"
+        }
+      ],
+      "end": "23:45"
+    },
+    {
+      "claim_id": "c07",
+      "speaker": "jin-jing",
+      "timestamp": "23:45",
+      "type": "方法论",
+      "statement": "第二层agent管agent：orchestration script从linear ticket到PR+HTML report全自动",
+      "relations": [
+        {
+          "type": "followed_by",
+          "target": "c09",
+          "note": "递进为层3"
+        },
+        {
+          "type": "principle",
+          "target": "c08",
+          "note": "层2的人机分工原则"
+        }
+      ],
+      "end": "24:59"
+    },
+    {
+      "claim_id": "c08",
+      "speaker": "jin-jing",
+      "timestamp": "24:59",
+      "type": "方法论",
+      "statement": "人只保留定目标+验收两处介入；中途介入要求AI给可视化HTML供快速review",
+      "relations": [
+        {
+          "type": "part_of",
+          "target": "c07",
+          "note": "层2的原则"
+        }
+      ],
+      "end": "25:51"
+    },
+    {
+      "claim_id": "c09",
+      "speaker": "jin-jing",
+      "timestamp": "25:51",
+      "type": "方法论",
+      "statement": "第三层全自动化：400任务中约200个定时跑SOP，发布agent每小时运行，社区运营agent每日triage",
+      "relations": [
+        {
+          "type": "cost",
+          "target": "c10",
+          "note": "层3引入成本问题"
+        }
+      ],
+      "end": "27:24"
+    },
+    {
+      "claim_id": "c10",
+      "speaker": "jin-jing",
+      "timestamp": "27:24",
+      "type": "事实数据",
+      "statement": "按API计费月耗数万美元；每家provider买1-2个$200订阅即可覆盖，多harness同时是成本套利",
+      "relations": [
+        {
+          "type": "context",
+          "target": "c11",
+          "note": "企业侧宏观佐证"
+        }
+      ],
+      "end": "32:24"
+    },
+    {
+      "claim_id": "c11",
+      "speaker": "jin-jing",
+      "timestamp": "10:09",
+      "type": "事实数据",
+      "statement": "AI token已成部分大企业第一大开销（超过DataDog），企业因此认真看Codex与open weight模型",
+      "relations": [
+        {
+          "type": "supports",
+          "target": "c10",
+          "note": "佐证成本压力普遍性"
+        }
+      ],
+      "end": "11:27"
+    },
+    {
+      "claim_id": "c12",
+      "speaker": "jin-jing",
+      "timestamp": "37:06",
+      "type": "判断预测",
+      "statement": "AI时代做出好产品仍需大量时间与token打磨，好taste仍是领先机会",
+      "relations": [
+        {
+          "type": "echoed_by",
+          "target": "c17",
+          "note": "与鸿沟论同构"
+        },
+        {
+          "type": "related",
+          "target": "c25",
+          "note": "与taste判断呼应"
+        }
+      ],
+      "end": "37:26"
+    },
+    {
+      "claim_id": "c15",
+      "speaker": "jin-jing",
+      "timestamp": "16:59",
+      "type": "经验教训",
+      "statement": "好工具难在细节：pty快照/缓存/性能优化等看不见的硬功夫",
+      "relations": [
+        {
+          "type": "exemplified_by",
+          "target": "c16",
+          "note": "c16为例证"
+        },
+        {
+          "type": "extended_by",
+          "target": "c17",
+          "note": "立正引申为鸿沟论"
+        }
+      ],
+      "end": "17:59"
+    },
+    {
+      "claim_id": "c16",
+      "speaker": "jin-jing",
+      "timestamp": "17:59",
+      "type": "方法论",
+      "statement": "Ghostty/iTerm三短板（非worktree-centric、无agent status、更新杀session）催生Orca；本地DB快照pty实现日更不断活",
+      "relations": [
+        {
+          "type": "example_of",
+          "target": "c15",
+          "note": "例证细节硬功夫"
+        }
+      ],
+      "end": "20:53"
+    },
+    {
+      "claim_id": "c17",
+      "speaker": "sun-yuzheng",
+      "timestamp": "20:53",
+      "type": "经验教训",
+      "statement": "prototype到production之间有鸿沟，能力不够看不见；AI能更快带到鸿沟边，跨过去仍需时间精力水平",
+      "relations": [
+        {
+          "type": "extends",
+          "target": "c15",
+          "note": "从细节引申到原型-生产鸿沟"
+        },
+        {
+          "type": "echoes",
+          "target": "c12",
+          "note": "与taste论同构呼应"
+        }
+      ],
+      "end": "21:14"
+    },
+    {
+      "claim_id": "c18",
+      "speaker": "jin-jing",
+      "timestamp": "37:26",
+      "type": "方法论",
+      "statement": "增长靠借力不靠对抗：95%时间做产品5%发推；不要求用户改变习惯的产品自发传播",
+      "relations": [
+        {
+          "type": "deepened_by",
+          "target": "c19",
+          "note": "留存论深化"
+        },
+        {
+          "type": "pattern",
+          "target": "c27",
+          "note": "c27为历史归纳"
+        }
+      ],
+      "end": "39:18"
+    },
+    {
+      "claim_id": "c19",
+      "speaker": "jin-jing",
+      "timestamp": "39:18",
+      "type": "方法论",
+      "statement": "赛道get traffic容易，真正在乎留存；用户试遍同类工具最后都选Orca，留存高才有viral growth",
+      "relations": [
+        {
+          "type": "deepens",
+          "target": "c18",
+          "note": "深化借力论"
+        }
+      ],
+      "end": "42:01"
+    },
+    {
+      "claim_id": "c20",
+      "speaker": "jin-jing",
+      "timestamp": "42:01",
+      "type": "方法论",
+      "statement": "比技术更关键的是land：打通找方向、摸玩家、找共鸣痛点、快速解决的每个环节",
+      "relations": [
+        {
+          "type": "how",
+          "target": "c21",
+          "note": "落地方法：100人访谈"
+        }
+      ],
+      "end": "43:06"
+    },
+    {
+      "claim_id": "c21",
+      "speaker": "jin-jing",
+      "timestamp": "43:06",
+      "type": "方法论",
+      "statement": "每个点子深度访谈约100人非问卷；三问：为什么想到/考虑过哪些替代/现有方案花了多少钱",
+      "relations": [
+        {
+          "type": "deepened_by",
+          "target": "c22",
+          "note": "Seibel标准深化"
+        },
+        {
+          "type": "condition",
+          "target": "c23",
+          "note": "湾区圈层是条件"
+        }
+      ],
+      "end": "44:40"
+    },
+    {
+      "claim_id": "c22",
+      "speaker": "jin-jing",
+      "timestamp": "44:40",
+      "type": "方法论",
+      "statement": "Seibel标准：B2B要了解到客户去年收入/增幅/最大开销，目标是成为其第一或第二大开销",
+      "relations": [
+        {
+          "type": "deepens",
+          "target": "c21",
+          "note": "深化访谈法"
+        }
+      ],
+      "end": "45:22"
+    },
+    {
+      "claim_id": "c23",
+      "speaker": "jin-jing",
+      "timestamp": "45:22",
+      "type": "方法论",
+      "statement": "湾区社交圈可直问企业采购与预算；问不到就换人问，答案大同小异",
+      "relations": [
+        {
+          "type": "enables",
+          "target": "c21",
+          "note": "访谈法的执行条件"
+        }
+      ],
+      "end": "47:01"
+    },
+    {
+      "claim_id": "c24",
+      "speaker": "jin-jing",
+      "timestamp": "47:01",
+      "type": "方法论",
+      "statement": "判断不保证正确，快速迭代拿反馈才重要；确认痛点后同时试N种解法",
+      "relations": [
+        {
+          "type": "tension_with",
+          "target": "c25",
+          "note": "迭代验证与taste决断的张力"
+        }
+      ],
+      "end": "48:03"
+    },
+    {
+      "claim_id": "c25",
+      "speaker": "jin-jing",
+      "timestamp": "48:03",
+      "type": "方法论",
+      "statement": "社区反馈只作参考（约50%），最终决定权在团队产品判断；数据只说30%，最后靠taste",
+      "relations": [
+        {
+          "type": "tension_with",
+          "target": "c24",
+          "note": "张力"
+        },
+        {
+          "type": "aligns_with",
+          "target": "c12",
+          "note": "呼应taste论"
+        }
+      ],
+      "end": "49:04"
+    },
+    {
+      "claim_id": "c26",
+      "speaker": "jin-jing",
+      "timestamp": "49:04",
+      "type": "经验教训",
+      "statement": "两个开悟：feature犹豫时以自己为标准用户；不要fight against大方向要build on top of it",
+      "relations": [
+        {
+          "type": "related",
+          "target": "c15",
+          "note": "开悟点关联细节论"
+        }
+      ],
+      "end": "51:31"
+    },
+    {
+      "claim_id": "c27",
+      "speaker": "jin-jing",
+      "timestamp": "51:31",
+      "type": "经验教训",
+      "statement": "三项目起步都靠'正确时间解决正确问题'的inbound；并利用GitHub标注新词ADE吃平台搜索流量",
+      "relations": [
+        {
+          "type": "summarizes",
+          "target": "c18",
+          "note": "归纳三项目规律"
+        }
+      ],
+      "end": "53:41"
+    },
+    {
+      "claim_id": "c28",
+      "speaker": "jin-jing",
+      "timestamp": "58:01",
+      "type": "判断预测",
+      "statement": "机会一：做回to C。B2B因AI反而更差（采购更慢更犹豫）；C端付费意愿提高，做'增长之饼'型app不卷",
+      "relations": [
+        {
+          "type": "contrast",
+          "target": "c29",
+          "note": "与c29/c30并列机会"
+        },
+        {
+          "type": "premise",
+          "target": "c05",
+          "note": "B2B变差承接大厂incentive论"
+        }
+      ],
+      "end": "60:49"
+    },
+    {
+      "claim_id": "c29",
+      "speaker": "jin-jing",
+      "timestamp": "60:49",
+      "type": "判断预测",
+      "statement": "机会二：软硬结合，中国创业者有供应链优势",
+      "relations": [
+        {
+          "type": "parallel",
+          "target": "c28",
+          "note": "并列机会"
+        }
+      ],
+      "end": "61:30"
+    },
+    {
+      "claim_id": "c30",
+      "speaker": "jin-jing",
+      "timestamp": "61:30",
+      "type": "判断预测",
+      "statement": "机会三：算力层——芯片到token间的优化、算力hosting/serving；湾区MacBook高配缺货；YC新batch热点即此",
+      "relations": [
+        {
+          "type": "parallel",
+          "target": "c28",
+          "note": "并列机会"
+        }
+      ],
+      "end": "63:57"
+    },
+    {
+      "claim_id": "c31",
+      "speaker": "jin-jing",
+      "timestamp": "63:57",
+      "type": "判断预测",
+      "statement": "传统行业如建筑也是机会：AI纯enable，但产品模式与工地实际场景间有巨大鸿沟",
+      "relations": [
+        {
+          "type": "extends",
+          "target": "c28",
+          "note": "扩展机会版图"
+        }
+      ],
+      "end": "66:50"
+    },
+    {
+      "claim_id": "c32",
+      "speaker": "jin-jing",
+      "timestamp": "11:27",
+      "type": "判断预测",
+      "statement": "不怕被顺手做掉：只要还有Codex在，中立层就存在；多玩家生态下不把任何一家视为竞争者",
+      "relations": [
+        {
+          "type": "responds_to",
+          "target": "c05",
+          "note": "回应lock-in论"
+        }
+      ],
+      "end": "13:24"
+    },
+    {
+      "claim_id": "c33",
+      "speaker": "jin-jing",
+      "timestamp": "53:41",
+      "type": "争议观点",
+      "statement": "AI与人类智能互补而非替代（虎鲸类比）；此判断直接决定财富分配形态",
+      "relations": [
+        {
+          "type": "implies",
+          "target": "c34",
+          "note": "推出教育批判"
+        },
+        {
+          "type": "implies",
+          "target": "c35",
+          "note": "推出transition论"
+        }
+      ],
+      "end": "56:05"
+    },
+    {
+      "claim_id": "c34",
+      "speaker": "jin-jing",
+      "timestamp": "56:05",
+      "type": "争议观点",
+      "statement": "教育过度强调可被AI取代的'标准件'能力，人的craft/passion/mastery未被强调",
+      "relations": [
+        {
+          "type": "implies",
+          "target": "c33",
+          "note": "由互补论推出"
+        }
+      ],
+      "end": "56:46"
+    },
+    {
+      "claim_id": "c35",
+      "speaker": "jin-jing",
+      "timestamp": "56:46",
+      "type": "判断预测",
+      "statement": "历史参照织布机时期80-90%英国青年失业：transition痛苦但被遗忘；适应者无焦虑",
+      "relations": [
+        {
+          "type": "implies",
+          "target": "c33",
+          "note": "由互补论推出"
+        }
+      ],
+      "end": "58:01"
+    }
+  ],
+  "extensions": {
+    "task_scale": [
+      {
+        "value": "400+ worktree，其中约200个定时自动化；Claude员工日开20个sub-worktree管PR review",
+        "timestamp": "08:31"
+      }
+    ],
+    "user_interview_method": [
+      {
+        "value": "100人深访+三问法+Mom Test+Seibel标准",
+        "timestamp": "43:06"
+      }
+    ],
+    "release_cadence": [
+      {
+        "value": "日更，每stable版含上百PR",
+        "timestamp": "12:00"
+      }
+    ],
+    "contrarian_views": [
+      {
+        "claim_ref": "c04",
+        "why_contrarian": "主流认为技术领先（比 Claude/Codex 做得好）是壁垒，作者认为真壁垒是日更迭代速度与自身是最重度用户"
+      },
+      {
+        "claim_ref": "c05",
+        "why_contrarian": "主流期待大厂做成集成层，作者认为大厂 incentive 在 lock-in，与中立集成层结构性冲突"
+      },
+      {
+        "claim_ref": "c28",
+        "why_contrarian": "主流认为 AI 时代应做 B2B，作者认为 B2B 因 AI 反而更差（采购更慢更犹豫），机会在 to C"
+      },
+      {
+        "claim_ref": "c33",
+        "why_contrarian": "主流叙事是 AI 替代人，作者认为 AI 与人类智能互补，并据此判断财富分配形态"
+      }
+    ],
+    "action_items": [
+      {
+        "action": "每个点子做约 100 人深访而非问卷，只问三题：为什么想到/考虑过哪些替代/现有方案花了多少钱",
+        "timestamp": "43:06"
+      },
+      {
+        "action": "B2B 尽调用 Seibel 标准：问客户去年收入、增幅、最大开销，目标是成为其第一或第二大开销",
+        "timestamp": "44:40"
+      },
+      {
+        "action": "确认痛点后同时并行试 N 种解法，不等判断正确",
+        "timestamp": "47:01"
+      },
+      {
+        "action": "feature 犹豫时以自己为标准用户；不要 fight against 大方向，要 build on top",
+        "timestamp": "49:04"
+      }
+    ],
+    "methods": [
+      {
+        "name": "海量 agent 三层管理法",
+        "steps": [
+          "索引式搜索（session/worktree/ticket 全入索引）",
+          "agent 管 agent（orchestration script 从 ticket 到 PR）",
+          "全自动化（约 200 个定时任务）"
+        ],
+        "ref_claims": [
+          "c06",
+          "c07",
+          "c09"
+        ],
+        "timestamp": "22:01"
+      },
+      {
+        "name": "land 五环节",
+        "steps": [
+          "找方向",
+          "摸玩家",
+          "找共鸣痛点",
+          "快速解决",
+          "形成口碑"
+        ],
+        "ref_claims": [
+          "c20"
+        ],
+        "timestamp": "42:01"
+      },
+      {
+        "name": "用户验证三问法",
+        "steps": [
+          "为什么想到这个",
+          "考虑过哪些替代",
+          "现有方案花了多少钱"
+        ],
+        "ref_claims": [
+          "c21"
+        ],
+        "timestamp": "43:06"
+      }
+    ],
+    "mental_models": [
+      {
+        "name": "虎鲸类比",
+        "mapping": "AI 与人类智能互补而非替代，如虎鲸与人类各自占据生态位",
+        "ref_claim": "c33",
+        "timestamp": "53:41"
+      },
+      {
+        "name": "鸿沟模型",
+        "mapping": "prototype 到 production 之间存在鸿沟，能力不足者看不见鸿沟",
+        "ref_claim": "c17",
+        "timestamp": "20:53"
+      },
+      {
+        "name": "借力而非对抗",
+        "mapping": "增长靠借力平台与用户既有习惯，而非逼用户改变",
+        "ref_claim": "c18",
+        "timestamp": "37:26"
+      }
+    ],
+    "opportunities": [
+      {
+        "value": "toC回潮/软硬结合/算力层/传统行业鸿沟",
+        "timestamp": "58:01"
+      }
+    ],
+    "metrics": [
+      {
+        "item": "Agent API 月耗",
+        "value": "API月耗数万美元；订阅制每家1-2个$200/月",
+        "timestamp": "27:24"
+      }
+    ]
+  },
+  "relations_schema": {
+    "说明": "每条claim的relations字段：type=关系类型，target=对象claim，note=一句话说明。类型：supports支撑/exemplified_by例证/extends引申/deepens深化/tension_with张力/responds_to回应/parallel并列/implies推出/precondition前提/part_of属于/echoes呼应",
+    "subgraphs": [
+      "①产品与工程",
+      "②400任务管理法",
+      "③创业方法论",
+      "④机会判断",
+      "⑤AI观"
+    ],
+    "slices_dir": "ep319_slices/"
+  },
+  "groups": [
+    {
+      "gid": "g1",
+      "name": "① 产品与工程",
+      "ids": [
+        "c01",
+        "c02",
+        "c15",
+        "c16",
+        "c17",
+        "c04",
+        "c05",
+        "c32"
+      ]
+    },
+    {
+      "gid": "g2",
+      "name": "② 核心方法论",
+      "ids": [
+        "c03",
+        "c06",
+        "c07",
+        "c08",
+        "c09",
+        "c10",
+        "c11"
+      ]
+    },
+    {
+      "gid": "g3",
+      "name": "③ 创业与增长",
+      "ids": [
+        "c20",
+        "c21",
+        "c22",
+        "c23",
+        "c24",
+        "c25",
+        "c12",
+        "c18",
+        "c19",
+        "c27",
+        "c26"
+      ]
+    },
+    {
+      "gid": "g4",
+      "name": "④ 判断与预测",
+      "ids": [
+        "c28",
+        "c29",
+        "c30",
+        "c31"
+      ]
+    },
+    {
+      "gid": "g5",
+      "name": "⑤ 底层观点",
+      "ids": [
+        "c33",
+        "c34",
+        "c35"
+      ]
+    }
+  ],
+  "picks": [
+    {
+      "claim_id": "c21",
+      "label": "每个点子深度访谈约100人非问卷；三问：为什么想到/考虑过哪些替代/现有方案花了多少钱",
+      "note": "",
+      "timestamp": "43:06",
+      "end": "44:40"
+    },
+    {
+      "claim_id": "c22",
+      "label": "Seibel标准：B2B要了解到客户去年收入/增幅/最大开销，目标是成为其第一或第二大开销",
+      "note": "",
+      "timestamp": "44:40",
+      "end": "45:22"
+    },
+    {
+      "claim_id": "c18",
+      "label": "增长靠借力不靠对抗：95%时间做产品5%发推；不要求用户改变习惯的产品自发传播",
+      "note": "",
+      "timestamp": "37:26",
+      "end": "39:18"
+    },
+    {
+      "claim_id": "c19",
+      "label": "赛道get traffic容易，真正在乎留存；用户试遍同类工具最后都选Orca，留存高才有viral growth",
+      "note": "",
+      "timestamp": "39:18",
+      "end": "42:01"
+    },
+    {
+      "claim_id": "c26",
+      "label": "两个开悟：feature犹豫时以自己为标准用户；不要fight against大方向要build on top of it",
+      "note": "",
+      "timestamp": "49:04",
+      "end": "51:31"
+    }
+  ]
+}
