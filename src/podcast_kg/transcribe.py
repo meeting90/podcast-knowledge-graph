@@ -2,10 +2,19 @@
 
 Outputs `.outputs/<audio>_transcript.json` (segment list with timestamps) and a
 human-readable `.outputs/<audio>_transcript.txt`.
+
+Runtime selection (all overridable from the CLI):
+
+  auto-detect CUDA  -> large-v3-turbo / float16 / beam 5
+  no usable CUDA    -> small / int8 / beam 1
+
+CUDA detection alone is not enough: ctranslate2 needs cuBLAS + cuDNN DLLs, so a
+failed CUDA init falls back to CPU instead of killing the run.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -16,17 +25,100 @@ import time
 from .deps import ensure
 from .outputs import ensure_parent, out_path, stem
 
+CUDA_MODEL = "large-v3-turbo"
+CPU_MODEL = "small"
+# faster-whisper decodes through PyAV, which dropped `metadata_errors` in av 19
+# while faster_whisper.audio still passes it -> hard crash on every audio file.
+# pyproject pins `av<19`; this is the friendly message if someone unpins it.
+MIN_AV = 19
+
+
+def cuda_device_count() -> int:
+    try:
+        import ctranslate2
+
+        return ctranslate2.get_cuda_device_count()
+    except Exception:  # noqa: BLE001 - probing must never be fatal
+        return 0
+
+
+def resolve_runtime(
+    model: str | None,
+    device: str | None,
+    compute_type: str | None,
+    beam: int | None,
+) -> tuple[str, str, str, int]:
+    """Fill in the blanks: explicit CLI flags win, `auto` picks by hardware."""
+    if device in (None, "auto"):
+        want_cuda = cuda_device_count() > 0
+    else:
+        want_cuda = device == "cuda"
+    device = "cuda" if want_cuda else "cpu"
+    model = model or (CUDA_MODEL if device == "cuda" else CPU_MODEL)
+    compute_type = compute_type or ("float16" if device == "cuda" else "int8")
+    if beam is None:
+        beam = 5 if device == "cuda" else 1
+    return model, device, compute_type, beam
+
+
+def enable_cuda_dlls() -> list[str]:
+    """Windows: make pip-installed cuBLAS/cuDNN wheels visible to ctranslate2.
+
+    `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` drop their DLLs under
+    site-packages/nvidia/<lib>/bin, which is not on PATH, so ctranslate2 dies
+    with "Library cublas64_12.dll is not found or cannot be loaded".
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        spec = importlib.util.find_spec("nvidia")
+    except (ImportError, ValueError):
+        return []
+    if not spec or not spec.submodule_search_locations:
+        return []
+    dirs: list[str] = []
+    for root in spec.submodule_search_locations:
+        for sub in ("cublas", "cudnn", "cuda_runtime", "cuda_nvrtc", "cufft"):
+            candidate = os.path.join(root, sub, "bin")
+            if os.path.isdir(candidate):
+                dirs.append(candidate)
+    for d in dirs:
+        try:
+            os.add_dll_directory(d)
+        except (AttributeError, OSError):
+            pass
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+    return dirs
+
+
+def check_pyav() -> None:
+    """Fail early, with a fix, instead of an opaque `open() got an unexpected ...`."""
+    try:
+        import av
+    except ImportError:
+        return
+    major = int(str(av.__version__).split(".")[0] or 0)
+    if major >= MIN_AV:
+        print(
+            f"[podcast-kg] 警告：PyAV {av.__version__} 与 faster-whisper 不兼容"
+            "（av 19 移除了 av.open(metadata_errors=…)）。修复：\n"
+            f'  {sys.executable} -m pip install "av<19"',
+            file=sys.stderr,
+            flush=True,
+        )
+
 
 def to_wav16k(src: str) -> str:
     """Convert to 16 kHz mono WAV for whisper.
 
-    faster-whisper can decode most containers through PyAV, so when ffmpeg is
-    unavailable the original file is used directly instead of failing.
+    faster-whisper can decode most containers through PyAV (same libav that
+    ffmpeg wraps), so when ffmpeg is unavailable the original file is used
+    directly instead of failing.
     """
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         print(
-            "[podcast-kg] 未找到 ffmpeg，直接用 PyAV 解码原音频（质量可能略差）",
+            "[podcast-kg] 未找到 ffmpeg，直接用 PyAV 解码原音频（质量无实质差别）",
             file=sys.stderr,
             flush=True,
         )
@@ -39,32 +131,128 @@ def to_wav16k(src: str) -> str:
     return dst
 
 
-def transcribe(audio: str, model_size: str = "small", language: str = "zh") -> list[dict]:
-    ensure("faster_whisper", "faster-whisper>=1.0.0")
+def load_model(model_size: str, device: str, compute_type: str):
+    """Load the model, degrading to CPU/int8 when CUDA is present but unusable."""
     from faster_whisper import WhisperModel
 
+    if device == "cuda":
+        enable_cuda_dlls()
+    try:
+        return WhisperModel(model_size, device=device, compute_type=compute_type), device, compute_type
+    except Exception as exc:  # noqa: BLE001 - RuntimeError from ctranslate2 when cuDNN is missing
+        if device != "cuda":
+            raise
+        print(
+            f"[podcast-kg] CUDA 初始化失败（{exc}），回退 CPU/int8；"
+            "装好 cuBLAS + cuDNN 9 后可用 --device cuda",
+            file=sys.stderr,
+            flush=True,
+        )
+        return WhisperModel(model_size, device="cpu", compute_type="int8"), "cpu", "int8"
+
+
+def _collect(
+    model,
+    audio: str,
+    language: str,
+    beam_size: int,
+    started: float,
+) -> list[dict]:
+    """Consume the segment generator, reporting progress every 30s."""
+    segments, _info = model.transcribe(
+        audio,
+        language=language,
+        vad_filter=True,
+        beam_size=beam_size,
+    )
+    out: list[dict] = []
+    last_report = started
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            out.append({"start": round(seg.start, 1), "end": round(seg.end, 1), "text": text})
+        now = time.time()
+        if now - last_report >= 30:
+            last_report = now
+            done = out[-1]["end"] if out else 0
+            print(
+                f"  进度 {done:.0f}s / 已出 {len(out)} 段 / 用时 {now - started:.0f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+    return out
+
+
+def transcribe(
+    audio: str,
+    model_size: str | None = None,
+    language: str = "zh",
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
+) -> list[dict]:
+    ensure("faster_whisper", "faster-whisper>=1.0.0")
+    check_pyav()
+
+    model_size, device, compute_type, beam_size = resolve_runtime(
+        model_size, device, compute_type, beam_size
+    )
+    print(
+        f"运行配置 {device}/{compute_type} · {model_size} · beam {beam_size}",
+        file=sys.stderr,
+        flush=True,
+    )
+
     t0 = time.time()
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    model, device, compute_type = load_model(model_size, device, compute_type)
     print(f"模型加载 {time.time() - t0:.0f}s", flush=True)
-    segments, _info = model.transcribe(audio, language=language, vad_filter=True, beam_size=1)
-    out = [
-        {"start": round(s.start, 1), "end": round(s.end, 1), "text": s.text.strip()}
-        for s in segments
-    ]
+
+    try:
+        out = _collect(model, audio, language, beam_size, t0)
+    except Exception as exc:  # noqa: BLE001 - ctranslate2 loads cuBLAS lazily, on first encode
+        if device != "cuda":
+            raise
+        # CUDA 上下文能建、但第一次真实推理才报缺 DLL。别让整期内容报废：降级重跑。
+        fallback_model = CPU_MODEL if model_size == CUDA_MODEL else model_size
+        print(
+            f"[podcast-kg] CUDA 推理失败（{exc}），回退 CPU/int8·{fallback_model} 重跑。\n"
+            "  想要 GPU：pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 后重试 --device cuda",
+            file=sys.stderr,
+            flush=True,
+        )
+        t0 = time.time()
+        model, device, compute_type = load_model(fallback_model, "cpu", "int8")
+        model_size = fallback_model
+        print(f"模型加载 {time.time() - t0:.0f}s", flush=True)
+        out = _collect(model, audio, language, beam_size, t0)
+
     if not out:
         raise SystemExit("没有识别到语音，请检查音频文件。")
-    print(f"转写完成: {len(out)} 段 / {out[-1]['end']}s / 耗时 {time.time() - t0:.0f}s")
+    print(
+        f"转写完成: {len(out)} 段 / {out[-1]['end']}s / 耗时 {time.time() - t0:.0f}s "
+        f"（{device}/{compute_type} · {model_size}）"
+    )
     return out
 
 
 def transcribe_file(
     src: str,
     out: str | None = None,
-    model_size: str = "small",
+    model_size: str | None = None,
     language: str = "zh",
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
 ) -> tuple[str, str]:
     wav = src if src.lower().endswith(".wav") else to_wav16k(src)
-    segs = transcribe(wav, model_size=model_size, language=language)
+    segs = transcribe(
+        wav,
+        model_size=model_size,
+        language=language,
+        device=device,
+        compute_type=compute_type,
+        beam_size=beam_size,
+    )
     target = ensure_parent(out) if out else out_path(stem(src) + "_transcript.json")
     with open(target, "w", encoding="utf-8") as fh:
         json.dump(segs, fh, ensure_ascii=False, indent=1)

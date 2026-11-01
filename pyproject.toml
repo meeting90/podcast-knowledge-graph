@@ -20,10 +20,13 @@ dependencies = []
 
 [project.optional-dependencies]
 # `podcast-kg transcribe` needs this; the CLI installs it on first use.
-transcribe = ["faster-whisper>=1.0.0"]
+# PyAV 19 removed `av.open(metadata_errors=...)` while faster-whisper still
+# passes it, so every decode fails with "unexpected keyword argument".
+# Keep PyAV below 19 until faster-whisper drops the argument.
+transcribe = ["faster-whisper>=1.0.0", "av>=11,<19"]
 # `podcast-kg ingest` needs this; the CLI installs it on first use.
 graph = ["semantica>=0.7.0"]
-all = ["faster-whisper>=1.0.0", "semantica>=0.7.0"]
+all = ["faster-whisper>=1.0.0", "av>=11,<19", "semantica>=0.7.0"]
 
 [project.scripts]
 podcast-kg = "podcast_kg.cli:main"

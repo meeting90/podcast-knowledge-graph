@@ -36,6 +36,24 @@ groups:                       # 必填，观点页的一级主题分组
     name: "① 产品与工程"
     ids: [c01, c02, ...]      # 必须覆盖全部 claim_id，不重不漏
 
+arcs:                         # 必填，阅读主视图（见 §2.7）
+  - arc_id: a01               # a01…，同卡内唯一
+    title: "从物理到脑科学：一条二十年的弯路"
+    summary: "这一段在讲什么（2–3 句）"
+    start: "01:14"             # 播放区间（含前后留白）
+    end: "10:08"
+    duration_sec: 534
+    speech_sec: 500           # 纯发言时长
+    open_question: "…"        # 主持人开启话题的问句（有则必填）
+    open_line: "…"            # 该话题被开启时的转写原话
+    points:                   # 2–4 条，按时间排序
+      - { claim_id: c01, at: "02:43", end: "03:22", statement: "…", speaker: "…" }
+    beats:                    # 3–6 个回合
+      - { at: "02:43", end: "03:30", speaker: "noah-shinn", gist: "…", claims: [c01] }
+    evidence: [c01, c02, c03] # 这一段覆盖的全部 claim（折叠展示）
+    context: [{ arc_id: a03, why: "…" }]  # 要听懂它，前面哪段已铺垫
+    arc_relations: [{ target: a05, type: supports, count: 2 }]
+
 # ── 人物层 ──
 people:
   - person_id: string         # 全局 slug（见 §2.6）
@@ -139,9 +157,50 @@ transcript_corrections:       # 专名纠正表（见 §4.4）
 - `person_id` 按 §2.4 的 slug 规则：`名-姓` 拼音（`liang-wenfeng`），不带角色后缀。
 - 同一人在不同卡角色不同（A 卡 guest、B 卡 mentioned），仍是同一个 `person_id`。
 
+### 2.7 话题弧 `arcs`（阅读单位，必填）
+
+**为什么必须有这一层**：逐句 claim 是索引，不是阅读单位。实测 60–75% 的相邻 claim
+间隔 ≤2 秒，它们本来是同一段话被切开的；而抽 claim 又天然只留“主张”，把**主持人
+开启话题的那个问题**过滤掉了——读者于是既没开头也没语境，只能连点好几次才滋出上下文。
+
+**定义**：一条弧 = 主持人开启一个话题 → 嘉宾展开 → 该话题自然收束。
+弧内应该是“提问 → 回应 → 追问 → 收束”，而不是平铺的观点列表。
+
+| 字段 | 必需 | 约束 |
+|---|---|---|
+| `arc_id` | ✓ | `a01` 起递推，同卡唯一 |
+| `title` | ✓ | 一个判断或一问，不要半句话；自动标题只能兜底 |
+| `summary` | ✓ | 2–3 句，告诉读者“为什么值得完整听这一段” |
+| `start` / `end` | ✓ | 播放区间；**相邻弧不得重叠**；>60 分钟用 `h:mm:ss` |
+| `duration_sec` | ✓ | `end - start`；`speech_sec` 另记纯发言时长 |
+| `open_question` | 有则必填 | 主持人的问句原话（能分出说话人时） |
+| `open_line` | 建议 | 弧起点处的转写原话；whisper 不做说话人分离，不得冒充归属 |
+| `points` | ✓ | **2–4 条**，按时间排序；代表点按被引用度 + 类型权重挑 |
+| `beats` | ✓ | 3–6 个回合，每回合一句话，不逐句搬 |
+| `evidence` | ✓ | 该弧覆盖的全部 claim_id；**全弧合起来必须 100% 覆盖 claims** |
+| `context` | 可选 | 跨弧依赖：要听懂这段，前面哪段已铺垫 |
+| `arc_relations` | 可选 | 弧与弧之间的关系；**弧内部不再连句子** |
+
+**切分硬规则**（按可靠性排序，只认这四类边界）：
+
+1. **停顿 ≥ 20s**（强边界）——真实话题切换几乎都伴随数秒以上沉默；
+2. **主题分组切换**（`groups` 边界）；
+3. **主持人重新提问**（guest → host 的发言轮转）；
+4. **停顿 ≥ 8s**（弱边界）。
+
+时长约束：目标 **3–10 分钟**；低于下限并进邻段，高于上限在最长停顿处再切。
+卡本身很粗（claim 中位 >80s）时，下限提到 5 分钟、上限提到 13 分钟，否则一段只剩两条卡。
+
+禁止事项：
+
+- 不按句子数切、不按固定条数切；
+- 不跨主题分组盲目合并（跨组只在 <60s 时才允许）；
+- 一个弧里少于 2 条 claim（除非卡本身极稀）；
+- 弧首尾不留白——起点前留 10s、终点后留 6s，再按中点切开以免重叠。
+
 ---
 
-## 三、抽取流程（七步）
+## 三、抽取流程（八步）
 
 ```
 S0 装载注册表 —— 读取 .outputs/registry/entities.json 与 .outputs/registry/people.json
@@ -151,8 +210,9 @@ S1 元数据填充 —— source 区机械填入，不理解内容
 S2 人物识别   —— 区分 host/guest/mentioned；guest 身份交叉验证；说话者强制校验（§四）
 S3 实体收集   —— 查注册表复用；未命中的暂标 new:true；同时判别「实体 vs 概念」（§2.5）
 S4 观点抽取   —— 逐段抽 claim，必带 timestamp+end+speaker+relations
+S4.5 分话题弧 —— 按 §2.7 聚成 arcs；补 title/summary；校验 evidence 全覆盖、区间不重叠
 S5 动态属性   —— 特有维度归 extensions；概念归 extensions.concepts；登记属性表
-S6 质检回链   —— 抽查 3 条 claim 对音频原文核验（最早/中位/end 边界）
+S6 质检回链   —— 抽查 3 条 claim（最早/中位/end）+ 3 段弧（最早/中位/最长）对音频核验
 S7 跨卡归一   —— a) 运行 `podcast-kg verify` 扫全部卡
                 b) 处理 A 类 id 冲突 / B 类疑似同一 / C 类新实体
                 c) 人工确认后回写 registry，再回填各卡 id
@@ -179,6 +239,16 @@ whisper 无说话人分离，speaker 标注必须交叉验证：
 ### 4.2 S6 质检回链
 
 每卡定稿前抽查 3 条（最早 / 中位 / end 上限触发的一条）：核对 statement 语义、speaker 归属、end 边界话题切换。不合格即修并记入校验报告。
+
+再加**弧体检**（这层最容易看起来对、实际不能听）：
+
+| 检查 | 判据 | 不过怎么办 |
+|---|---|---|
+| 全覆盖 | `arcs[].evidence` 去重后 == 全部 claim_id | 找回漏掉的 claim 或补弧 |
+| 不重叠 | 相邻弧 `end ≤ 下一弧 start` | 在停顿中点切开 |
+| 不碎 | 无 `< 60s` 的弧，中位落在 3–10 分钟 | 并进邻段 |
+| 有上下文 | 每弧有 `open_question` 或 `open_line` | 回听弧起点前 15 秒 |
+| 能立住 | 抽查 3 段（最早/中位/最长）连续听完，不看文字也能听懂 | 边界没切对，重切 |
 
 ### 4.3 S7 跨卡校验
 
@@ -214,6 +284,20 @@ whisper 对人名/产品名易错（clock→Claude、虎精→Orca、曾敏→�
 
 ## 五、时间点回链机制
 
+弧层与 claim 层两套区间，同一份音频：
+
+- **claim 回链**（细）：点一句话跳过去，给引用与图谱溯源用；
+- **arc 回链**（粗）：点一下**连续播完整段**，播到 `end` 自动停——这是读者的默认交互。
+
+弧区间规则：
+
+1. `start` = 首条 claim 起点 − 10s，但不能早于上一弧的中点；
+2. `end` = 末条 claim 终点 + 6s，但不能晚于下一弧的中点；
+3. **相邻弧区间永不重叠**，否则连播会听到重复的十几秒；
+4. 超过 60 分钟的节目用 `h:mm:ss`，不要写成 `66:21`（前端自己切 `:` 会算错）；
+5. 广告段、预告片不进弧，记入 `extensions.ad_blocks`。
+
+
 - `timestamp~end` 为回链区间，点击跳原音频起始点，播到 end 自动暂停；
 - **end 规则**：
   1. 默认 = 下一条 claim 的 `timestamp`；
@@ -233,11 +317,16 @@ whisper 对人名/产品名易错（clock→Claude、虎精→Orca、曾敏→�
 ```
 .outputs/
 ├── <audio>_transcript.json / .txt
-├── <content_id>.json / .md
-├── <content_id>.html
+├── <content_id>.json / .md          知识卡（含 arcs）
+├── <content_id>_arcs.json           话题弧层（给产品端）
+├── <content_id>.html                逐句观点页
+├── <content_id>_arcs.html           话题弧页（本地验收：点一次连播一整段）
 ├── <content_id>_graph.json
 └── registry/
 ```
+
+弧的精修标题/导语是**人工资产**，单独存一份 `<content_id> 或全局>_curated.json`（`content_id → arc_id → {title, summary}`），
+因为切分可重算、好标题不可重算。回传时它必须跟着卡一起走，否则产品端只剩自动标题。
 
 ### 6.1 每条内容两个文件
 
@@ -268,4 +357,8 @@ whisper 对人名/产品名易错（clock→Claude、虎精→Orca、曾敏→�
 4. `entity_id` / `person_id` 必须符合 §2.4 slug 规则；
 5. 人名不得出现在 entities；通用概念不得出现在 entities；
 6. 不得编造时间戳，end 不得超出音频时长；
-7. statement 超过 50 字视为未提炼，须重写。
+7. statement 超过 50 字视为未提炼，须重写；
+8. `arcs[].evidence` 合起来必须覆盖全部 claim，禁止孤儿 claim；
+9. 相邻弧播放区间不得重叠，也不得出现 <60 秒的碎弧；
+10. 弧的 `title` 不得是 statement 的前 N 个字（宁可写一句人话）；
+11. `open_line` 是转写原话，不得改写、不得冒充说话人归属。

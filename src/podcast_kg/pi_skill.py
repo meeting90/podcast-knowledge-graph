@@ -53,11 +53,25 @@ def pretty(path: Path) -> str:
 
 
 def _skill_resource():
-    return resources.files("podcast_kg").joinpath("skill")
+    """优先用包里自带的副本；editable 安装下退回到源码树里的 .pi/skills。"""
+    packaged = resources.files("podcast_kg").joinpath("skill")
+    if packaged.is_dir():
+        return packaged
+    fallback = Path(__file__).resolve().parent.parent.parent / ".pi" / "skills" / SKILL_NAME
+    if fallback.is_dir():
+        return fallback
+    return packaged
 
 
 def _append_doc() -> str:
-    raw = resources.files("podcast_kg").joinpath("APPEND_SYSTEM.md").read_text(encoding="utf-8")
+    packaged = resources.files("podcast_kg").joinpath("APPEND_SYSTEM.md")
+    if packaged.is_file():
+        raw = packaged.read_text(encoding="utf-8")
+    else:
+        # editable 安装不会带 force-include 的文件；退回到仓库根目录那份
+        raw = (Path(__file__).resolve().parent.parent.parent / "APPEND_SYSTEM.md").read_text(
+            encoding="utf-8"
+        )
     lines = [
         line
         for line in raw.replace("\r\n", "\n").split("\n")
