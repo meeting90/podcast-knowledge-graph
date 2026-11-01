@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""HERON · verify_cards.py — 跨卡实体/人物归一校验
+"""跨卡实体/人物归一校验
 
-用法:
-  python verify_cards.py card1.json card2.json ...            # 只报告
-  python verify_cards.py --build-registry out.json *.json     # 生成注册表草案
-
-输出三类问题:
+由 `podcast-kg verify` 调用。三类输出:
   A. id 冲突    —— 同名（或同别名）在不同卡里用了不同 id
   B. 疑似同一  —— 名称高度相似但 id 不同（归一化后相同、别名交叉）
   C. 新实体    —— 当前注册表中不存在的实体（需人工确认后写入）
 """
-import json, sys, re, unicodedata
+import json, re, unicodedata, os
 from collections import defaultdict
 
 
@@ -36,8 +32,8 @@ def collect(files):
     recs = defaultdict(list)   # norm_name -> [(card, id, name, type)]
     by_id = defaultdict(set)   # id -> {(card, name)}
     for f in files:
-        card = json.load(open(f))
-        short = f.split("/")[-1].replace("知识卡_", "").replace(".json", "")
+        card = json.load(open(f, encoding="utf-8"))
+        short = os.path.basename(f).replace("知识卡_", "").replace(".json", "")
         for e in card.get("entities", []):
             eid = e.get("entity_id") or e.get("name")
             name = e.get("name", eid)
@@ -141,7 +137,7 @@ def build_registry(files):
     """生成注册表草案：每个 id 一条，含 name/aliases/cards/type。"""
     reg = {}
     for f in files:
-        card = json.load(open(f))
+        card = json.load(open(f, encoding="utf-8"))
         cid = card.get("content_id", f)
         for e in card.get("entities", []):
             eid = e.get("entity_id") or e.get("name")
@@ -163,22 +159,26 @@ def build_registry(files):
     return reg
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
-    if args and args[0] == "--build-registry":
-        out = args[1]
-        reg = build_registry(args[2:])
-        json.dump(reg, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        print(f"注册表草案已写入 {out}（{len(reg)} 条）")
-    elif args and args[0] == "--coverage":
-        # --coverage <card.json> [transcript.txt]
-        card = json.load(open(args[1]))
-        tpath = args[2] if len(args) > 2 else None
-        txt = open(tpath, encoding="utf-8").read() if tpath else None
-        check_coverage(card, txt, args[1].split("/")[-1])
-    else:
-        if len(args) < 2:
-            print(__doc__)
-            sys.exit(1)
-        recs, by_id = collect(args)
-        report(recs, by_id)
+def verify(files):
+    """Cross-card entity/person normalisation report."""
+    recs, by_id = collect(files)
+    return report(recs, by_id)
+
+
+def write_registry(out, files):
+    """Write a registry draft for the given cards."""
+    reg = build_registry(files)
+    parent = os.path.dirname(out)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(reg, fh, ensure_ascii=False, indent=2)
+    print(f"注册表草案已写入 {out}（{len(reg)} 条）")
+    return out
+
+
+def coverage(card_path, transcript_path=None):
+    """Coverage report for the six core dimensions."""
+    card = json.load(open(card_path, encoding="utf-8"))
+    txt = open(transcript_path, encoding="utf-8").read() if transcript_path else None
+    check_coverage(card, txt, os.path.basename(card_path))

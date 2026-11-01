@@ -3,7 +3,11 @@
 .venv/
 venv/
 out/
+.outputs/
 *.mp3
 *.wav
 *.m4a
 .DS_Store
+dist/
+build/
+*.egg-info/

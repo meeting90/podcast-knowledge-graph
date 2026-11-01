@@ -1,0 +1,12 @@
+{
+  "name": "podcast-knowledge-graph",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi extension + skill + Python CLI that turns podcasts into timestamped, source-linked knowledge cards.",
+  "keywords": ["pi-package", "podcast", "transcript", "knowledge-graph"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./.pi/extensions/podcast-kg.ts"],
+    "skills": ["./.pi/skills"]
+  }
+}

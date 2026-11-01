@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""HERON · ingest_graph.py — 知识卡 JSON → Semantica 图谱适配器
+"""知识卡 JSON → Semantica 图谱适配器
 
-用法: python ingest_graph.py <knowledge_card.json> [--out graph.json]
-已验证: semantica 0.7.0, 43节点/119边, 中文无损 (pilot 2026-10-17)
+默认输出 `.outputs/<card>_graph.json`。需要 semantica（由 `podcast-kg ingest`
+按需安装）。已验证: semantica 0.7.0, 43 节点/119 边, 中文无损。
 """
-import json, sys
+import json, os
+
+from .deps import ensure
+from .outputs import out_path, stem, ensure_parent
 
 def card_to_graph(card: dict) -> dict:
     entities, relationships = [], []
@@ -52,21 +55,19 @@ def register_provenance(card: dict):
     return pm
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__); sys.exit(1)
-    card = json.load(open(sys.argv[1]))
+def ingest(card_path: str, out: str | None = None) -> str:
+    """Build a graph snapshot and register PROV-O provenance."""
+    ensure("semantica", "semantica>=0.7.0")
+    card = json.load(open(card_path, encoding="utf-8"))
     data = card_to_graph(card)
     from semantica.kg import GraphBuilder
     res = GraphBuilder(merge_entities=True).build(data)
     print(f"图构建: {len(res['entities'])} 节点, {len(res['relationships'])} 边, "
           f"拒绝关系 {res['metadata'].get('rejected_relationships')}")
     pm = register_provenance(card)
-    print(f"溯源登记: {len(pm.get_all_sources())} 个来源")
-    out = sys.argv[3] if len(sys.argv) > 3 else sys.argv[1].replace(".json", "_graph.json")
-    json.dump(res, open(out, "w"), ensure_ascii=False, indent=1)
-    print("图快照:", out)
-
-
-if __name__ == "__main__":
-    main()
+    print(f"溯源登记: {len(card.get('claims', []))} 条 claim")
+    target = ensure_parent(out) if out else out_path(stem(card_path) + "_graph.json")
+    with open(target, "w", encoding="utf-8") as fh:
+        json.dump(res, fh, ensure_ascii=False, indent=1)
+    print("图快照:", target)
+    return target
