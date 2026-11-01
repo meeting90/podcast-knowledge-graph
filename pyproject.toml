@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podcast-kg"
+version = "0.1.0"
+description = "Timestamped, source-linked knowledge cards for podcasts: transcribe, verify, render, ingest — and install the matching Pi skill."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "meeting90", url = "https://github.com/meeting90" }]
+keywords = ["podcast", "transcript", "knowledge-graph", "whisper", "pi", "skill"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# `podcast-kg transcribe` needs this; the CLI installs it on first use.
+transcribe = ["faster-whisper>=1.0.0"]
+# `podcast-kg ingest` needs this; the CLI installs it on first use.
+graph = ["semantica>=0.7.0"]
+all = ["faster-whisper>=1.0.0", "semantica>=0.7.0"]
+
+[project.scripts]
+podcast-kg = "podcast_kg.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/meeting90/podcast-knowledge-graph"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podcast_kg"]
+
+# Single source of truth lives next to the Pi manifest; both the Pi package
+# (.pi/...) and `podcast-kg setup` (pip install) read the same files.
+[tool.hatch.build.targets.wheel.force-include]
+".pi/skills/podcast-knowledge-graph" = "podcast_kg/skill"
+"APPEND_SYSTEM.md" = "podcast_kg/APPEND_SYSTEM.md"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src",
+  ".pi",
+  "APPEND_SYSTEM.md",
+  "package.json",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE",
+]
