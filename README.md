@@ -1,6 +1,8 @@
 # podcast-knowledge-graph
 
-一个 **Pi extension + Python 扩展包**：装一次，Pi 里就能把播客 / 长视频 / 深度访谈抽成**可溯源的知识卡**（JSON + Markdown），渲染成 HERON 同款的观点页（可折叠、点时间戳回链原声），或写入知识图谱。
+> **在线版：[heronai.top](https://heronai.top)** —— HERON 把这条流水线的产物直接跑成了产品：口语内容的知识图谱，每个观点都能回溯到它被说出的那一秒。
+
+一个 **Pi extension + Python 扩展包**：装一次，Pi 里就能把播客 / 长视频 / 深度访谈抽成**可溯源的知识卡**（JSON + Markdown），渲染成 [HERON](https://heronai.top) 同款的观点页（可折叠、点时间戳回链原声），或写入知识图谱。
 
 - **Pi extension**（`.pi/extensions/podcast-kg.ts`）：薄桥接层，负责准备 Python 环境、把 `podcast-kg` 放进 PATH、追加 system prompt、注册 skill；
 - **Python 包**（`src/podcast_kg`）：真正干活的 CLI——转写、校验、渲染、入库。
@@ -173,6 +175,8 @@ podcast-knowledge-graph/
                        HTML 观点页   知识图谱（含 PROV-O 溯源）
 ```
 
+产物的成品形态可以直接看 **[heronai.top](https://heronai.top)**：那套页面就是 `podcast-kg render` 的目标版式。
+
 ## 渲染模式
 
 `podcast-kg render <card.json> [out.html] [--mode audio|redirect]`：
@@ -181,6 +185,8 @@ podcast-knowledge-graph/
 | --- | --- |
 | `redirect` | 纯文字卡 + 官方链接（最保守） |
 | `audio` | 自绘播放器 + 时间点跳转，播到 `end` 自动暂停 |
+
+版式对齐 [heronai.top](https://heronai.top) 的详情页；本地渲染出来的是自包含单文件 HTML，样式与站点一致。
 
 页面右上角「✎ 编辑推荐」进入编辑态：点行尾 ☆ 增删推荐、填推荐理由，面板里可以：
 
