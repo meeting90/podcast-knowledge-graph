@@ -131,8 +131,82 @@ def to_wav16k(src: str) -> str:
     return dst
 
 
+def hf_cache_roots() -> list[str]:
+    """Where huggingface_hub keeps snapshots, in its own precedence order."""
+    env = os.environ
+    roots: list[str] = []
+    for key in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        if env.get(key):
+            roots.append(env[key])
+    if env.get("HF_HOME"):
+        roots.append(os.path.join(env["HF_HOME"], "hub"))
+    roots.append(os.path.join("~", ".cache", "huggingface", "hub"))
+    return [os.path.expanduser(root) for root in roots]
+
+
+def is_cached(model: str) -> bool:
+    """True when whisper weights for `model` are already on this disk.
+
+    Deliberately answered without importing faster_whisper: that import pulls in
+    huggingface_hub, whose offline switch is frozen at import time — the check
+    would come too late to be useful.
+    """
+    if os.path.isdir(model):  # a local checkout of the model, no Hub involved
+        return True
+    # `Systran/faster-whisper-small` -> `models--Systran--faster-whisper-small`;
+    # plain sizes become `models--<org>--faster-whisper-small`, org varies.
+    if "/" in model:
+        wanted = ["models--" + model.replace("/", "--")]
+    else:
+        wanted = []
+    suffix = f"--faster-whisper-{model.rsplit('/', 1)[-1]}"
+    for root in hf_cache_roots():
+        try:
+            entries = os.listdir(root)
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.startswith("models--"):
+                continue
+            if not (entry in wanted or entry.endswith(suffix)):
+                continue
+            snapshots = os.path.join(root, entry, "snapshots")
+            try:
+                revs = os.listdir(snapshots)
+            except OSError:
+                continue
+            for rev in revs:
+                if os.path.isfile(os.path.join(snapshots, rev, "model.bin")):
+                    return True
+    return False
+
+
+def skip_hub_when_cached(model: str) -> str:
+    """Keep huggingface_hub off the network when the weights are local.
+
+    Left alone, every run pays a metadata round-trip to the Hub: on a machine
+    that cannot reach it, that is a 130-second retry backoff *per invocation*
+    before the cached snapshot is used. A 154-minute episode then takes 20
+    minutes instead of 16, and four parallel chunks spend 8 minutes of wall
+    clock doing nothing.
+    """
+    if os.environ.get("HF_HUB_OFFLINE") == "1":
+        return "沿用外部 HF_HUB_OFFLINE=1"
+    if is_cached(model):
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        where = "本地模型目录" if os.path.isdir(model) else "本地缓存"
+        return f"用{where}，跳过 Hub 联网检查（HF_HUB_OFFLINE=1）"
+    # 真没缓存：下载前先问一句能不能连上，别让元数据请求挂两分钟。
+    os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "5")
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+    return ("本地无缓存，走 Hub 下载（需能连 huggingface.co；离线机器请设 HF_ENDPOINT 镜像，"
+            "或用 --model 指向本地模型目录）")
+
+
 def load_model(model_size: str, device: str, compute_type: str):
     """Load the model, degrading to CPU/int8 when CUDA is present but unusable."""
+    # Must run before `import faster_whisper`: that import freezes HF_HUB_OFFLINE.
+    print(f"缓存检查 {skip_hub_when_cached(model_size)}", file=sys.stderr, flush=True)
     from faster_whisper import WhisperModel
 
     if device == "cuda":
