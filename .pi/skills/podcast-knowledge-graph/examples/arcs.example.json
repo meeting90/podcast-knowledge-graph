@@ -1,0 +1,68 @@
+{
+  "_note": "话题弧层示例（§2.7）。真实产物是 <content_id>_arcs.json：在知识卡原文件基础上多一个顶层 arcs[]，claims 保留为证据层。这里只留两条弧，用来看字段形状。",
+  "content_id": "transistor_20260917_e319",
+  "stats": { "claims": 33, "arcs": 8, "median_claim_sec": 104, "median_arc_sec": 502 },
+  "policy": {
+    "unit": "话题弧：主持人开启一个话题到它自然结束",
+    "target_sec": [300, 780],
+    "coarse_card": true,
+    "boundaries": ["停顿>=20s（强）", "主题分组切换", "主持人重新提问", "停顿>=8s（弱）"],
+    "padding_sec": [10, 6],
+    "key_points_max": 4
+  },
+  "arcs": [
+    {
+      "arc_id": "a01",
+      "title": "ADE 的价值：集成、并行、对 harness 中立",
+      "summary": "Orca 的定位是集成性 + 高 agent 并行 + 对 Claude Code / Codex 中立，用户不必更换 harness。刻意不与现有工具对立，因为 CLI 用户远多于 GUI，逼用户换界面只会拖慢自己的迭代。",
+      "group": "① 产品与工程",
+      "start": "00:53",
+      "end": "08:24",
+      "duration_sec": 451,
+      "speech_sec": 435,
+      "open_question": "先请你介绍一下你们的产品和公司，尤其是对一个平时在用 Claude Code、Codex，但从没了解过 Agentic IDE 的人。",
+      "open_line": "恭喜恭喜 我刚看了一下 49000核心了 马上到5万核心了 …… 我们先就是请你介绍一下 你们的产品和你们的公司",
+      "points": [
+        { "claim_id": "c01", "at": "01:03", "end": "06:03", "speaker": "jin-jing", "statement": "ADE价值=集成性+高agent并行+对Claude Code/Codex中立，用户无需更换harness" },
+        { "claim_id": "c02", "at": "06:29", "end": "08:24", "speaker": "jin-jing", "statement": "不与现有工具对立是刻意设计：CLI用户远多于GUI，逼用户换界面会拖慢自己的迭代速度" }
+      ],
+      "beats": [
+        { "at": "00:53", "end": "01:03", "speaker": "sun-yuzheng", "gist": "开场：先请嘉宾自我介绍产品与公司", "claims": [] },
+        { "at": "01:03", "end": "06:03", "speaker": "jin-jing", "gist": "ADE 的三层价值：集成、并行、对 harness 中立", "claims": ["c01"] },
+        { "at": "06:29", "end": "08:24", "speaker": "jin-jing", "gist": "为什么不与现有工具对立：CLI 用户基数决定策略", "claims": ["c02"] }
+      ],
+      "evidence": ["c01", "c02"],
+      "context": [],
+      "arc_relations": [{ "target": "a03", "type": "precondition", "count": 1 }]
+    },
+    {
+      "arc_id": "a02",
+      "title": "400 个 worktree 怎么分诊",
+      "summary": "靠跨 harness 统一的 agent status（working / 阻塞 / 待 review）做分诊。同期他观察到 token 已成部分大企业第一大开销，超过 DataDog。",
+      "group": "② 核心方法论",
+      "start": "08:24",
+      "end": "11:27",
+      "duration_sec": 183,
+      "speech_sec": 180,
+      "open_question": "",
+      "open_line": "400个worktree靠跨harness统一agent status分诊（working/阻塞/待review）管理",
+      "points": [
+        { "claim_id": "c03", "at": "08:24", "end": "10:09", "speaker": "jin-jing", "statement": "400个worktree靠跨harness统一agent status分诊（working/阻塞/待review）管理" },
+        { "claim_id": "c11", "at": "10:09", "end": "11:27", "speaker": "jin-jing", "statement": "AI token已成部分大企业第一大开销（超过DataDog），企业因此认真看Codex与open weight模型" }
+      ],
+      "beats": [
+        { "at": "08:24", "end": "10:09", "speaker": "jin-jing", "gist": "400 个 worktree 的管理靠统一的 status 分诊", "claims": ["c03"] },
+        { "at": "10:09", "end": "11:27", "speaker": "jin-jing", "gist": "token 已成部分大企业第一大开销", "claims": ["c11"] }
+      ],
+      "evidence": ["c03", "c11"],
+      "context": [{ "arc_id": "a01", "why": "分诊建立在 a01 讲的中立集成层之上" }],
+      "arc_relations": [{ "target": "a04", "type": "precondition", "count": 1 }]
+    }
+  ],
+  "claims": [
+    { "claim_id": "c01", "statement": "ADE价值=集成性+高agent并行+对Claude Code/Codex中立，用户无需更换harness", "speaker": "jin-jing", "timestamp": "01:03", "end": "06:03" },
+    { "claim_id": "c02", "statement": "不与现有工具对立是刻意设计：CLI用户远多于GUI，逼用户换界面会拖慢自己的迭代速度", "speaker": "jin-jing", "timestamp": "06:29", "end": "08:24" },
+    { "claim_id": "c03", "statement": "400个worktree靠跨harness统一agent status分诊（working/阻塞/待review）管理", "speaker": "jin-jing", "timestamp": "08:24", "end": "10:09" },
+    { "claim_id": "c11", "statement": "AI token已成部分大企业第一大开销（超过DataDog），企业因此认真看Codex与open weight模型", "speaker": "jin-jing", "timestamp": "10:09", "end": "11:27" }
+  ]
+}

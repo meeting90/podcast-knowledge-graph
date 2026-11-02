@@ -50,9 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = add(
         "transcribe",
         "音频 → 带时间戳的转写稿",
-        "用本地 faster-whisper 转写音频，输出段级时间戳。首次运行会下载 whisper 模型（数百 MB）并可能自动安装 faster-whisper。",
+        "用本地 faster-whisper 转写音频，输出段级时间戳。首次运行会下载 whisper 模型（数百 MB）并可能自动安装 faster-whisper。"
+        "默认自动选运行配置：有可用 CUDA 用 large-v3-turbo/float16/beam 5，否则 small/int8/beam 1。",
         """输入
   <audio>        mp3 / wav / m4a 等；有 ffmpeg 时先转 16k 单声道，没有则用 PyAV 直接解码
+
+运行配置
+  --device auto         有 ctranslate2 可用的 CUDA 设备则用 GPU，否则 CPU
+  --compute-type auto   GPU→float16，CPU→int8
+  --model auto          GPU→large-v3-turbo，CPU→small
+  --beam auto           GPU→5，CPU→1
+  CUDA 存在但 cuBLAS/cuDNN 缺失时自动回退 CPU/int8，不中断任务
 
 输出
   <out> 或 .outputs/<audio>_transcript.json   [{"start": 12.3, "end": 15.8, "text": "…"}, …]
@@ -60,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 副作用
   .outputs/<audio>.16k.wav（有 ffmpeg 时会生成中间文件）
+  模型缓存在 HF 缓存目录（GPU 的 large-v3-turbo 约 1.6 GB）
 
 失败语义
   音频不可解码 / 无语音 → 退出码 1
@@ -67,8 +76,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("audio", help="音频文件；也可传已转好的 .wav")
     p.add_argument("out", nargs="?", help="输出 JSON 路径（默认 .outputs/<audio>_transcript.json）")
-    p.add_argument("--model", default="small", help="whisper 模型大小（tiny/base/small/medium/large-v3；默认 %(default)s）")
+    p.add_argument(
+        "--model",
+        default=None,
+        help="whisper 模型（tiny/base/small/medium/large-v3/large-v3-turbo；默认按设备自动选）",
+    )
     p.add_argument("--lang", default="zh", help="音频语言代码（默认 %(default)s）")
+    p.add_argument(
+        "--device",
+        default="auto",
+        choices=["auto", "cuda", "cpu"],
+        help="推理设备（默认 %(default)s）",
+    )
+    p.add_argument(
+        "--compute-type",
+        default=None,
+        choices=["auto", "int8", "int8_float16", "float16", "float32"],
+        help="量化精度（默认按设备自动选）",
+    )
+    p.add_argument("--beam", type=int, default=None, help="beam search 宽度（默认按设备自动选）")
     p.set_defaults(func=None, name="transcribe")
 
     p = add(
@@ -201,6 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
         "打印运行环境：解释器路径、包目录、ffmpeg、可选依赖是否就绪、skill 装在哪个 scope。可用 --install 预先安装可选依赖。",
         """输出
   stdout 人类可读；--json 输出机器可读对象（含 skill_installed.user / .project）
+  转写能力：ctranslate2 版本、可用 CUDA 设备数、PyAV 版本及与 faster-whisper 的兼容性
 
 --install 取值
   transcribe  faster-whisper
@@ -212,11 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="机器可读输出")
     p.add_argument("--agent-dir", help="覆盖 Pi agent 目录（用于检查 skill 安装位置）")
-    p.add_argument(
-        "--install",
-        choices=["transcribe", "graph", "all"],
-        help="预先安装可选依赖到当前解释器",
-    )
+    p.add_argument("--install", choices=["transcribe", "graph", "all"], help="预先安装可选依赖到当前解释器")
+    p.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"], help="doctor 检查时使用的设备策略（默认 %(default)s）")
     p.set_defaults(func=None, name="doctor")
 
     return parser

@@ -25,7 +25,15 @@ from . import __version__
 def cmd_transcribe(args: argparse.Namespace) -> int:
     from .transcribe import transcribe_file
 
-    transcribe_file(args.audio, args.out, model_size=args.model, language=args.lang)
+    transcribe_file(
+        args.audio,
+        args.out,
+        model_size=args.model,
+        language=args.lang,
+        device=args.device,
+        compute_type=args.compute_type,
+        beam_size=args.beam,
+    )
     return 0
 
 
@@ -129,6 +137,35 @@ def cmd_unsetup(args: argparse.Namespace) -> int:
     return 0
 
 
+def transcribe_caps(device: str = "auto") -> dict:
+    """Environment facts for `doctor`: what `transcribe` would actually do here."""
+    from .transcribe import MIN_AV, resolve_runtime
+
+    caps: dict = {}
+    try:
+        import ctranslate2
+
+        caps["ctranslate2"] = ctranslate2.__version__
+        caps["cuda_devices"] = ctranslate2.get_cuda_device_count()
+    except Exception:  # noqa: BLE001 - probing only
+        caps["ctranslate2"] = None
+        caps["cuda_devices"] = 0
+
+    try:
+        import av
+
+        version = str(av.__version__)
+        caps["pyav"] = version
+        caps["pyav_compatible"] = int(version.split(".")[0] or 0) < MIN_AV
+    except Exception:  # noqa: BLE001
+        caps["pyav"] = None
+        caps["pyav_compatible"] = True
+
+    model, dev, compute, beam = resolve_runtime(None, device, None, None)
+    caps["transcribe"] = {"model": model, "device": dev, "compute_type": compute, "beam": beam}
+    return caps
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     from .deps import ensure, has_module
     from .pi_skill import installed, pretty
@@ -159,6 +196,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "auto_install": not os.environ.get("PODCAST_KG_NO_AUTO_INSTALL"),
         "skill_installed": installed(agent_dir_override=args.agent_dir),
     }
+    info.update(transcribe_caps(args.device))
     if args.json:
         print(json.dumps(info, ensure_ascii=False, indent=2))
         return 0
@@ -166,10 +204,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"podcast-kg  {info['podcast_kg']}")
     print(f"python      {info['python']}  ({info['python_executable']})")
     print(f"包目录      {info['package_dir']}")
-    print(f"ffmpeg      {info['ffmpeg'] or '未找到（将用 PyAV 直接解码）'}")
+    print(f"ffmpeg      {info['ffmpeg'] or '未找到（用 PyAV 直接解码，ffmpeg 只影响解码路径，不影响识别质量）'}")
     print(f"faster-whisper  {'已安装' if info['faster_whisper'] else '未安装（首次 transcribe 自动安装）'}")
     print(f"semantica   {'已安装' if info['semantica'] else '未安装（首次 ingest 自动安装）'}")
     print(f"输出目录    {info['outputs_dir']}")
+
+    if info["faster_whisper"]:
+        cuda = info.get("cuda_devices", 0)
+        print(
+            "转写运行配置 {device}/{compute_type} · {model} · beam {beam}".format(**info["transcribe"])
+        )
+        print(
+            f"ctranslate2 {info.get('ctranslate2') or '未安装'}  CUDA 设备 {cuda}"
+            + ("" if cuda else "  ← 无可用 CUDA，将用 CPU（慢一个量级）")
+        )
+        print(f"PyAV        {info.get('pyav') or '未安装'}")
+        if not info.get("pyav_compatible", True):
+            print(
+                "⚠️ PyAV 与 faster-whisper 不兼容（av 19 移除了 av.open(metadata_errors=…)），"
+                '转写会直接报错。修复：pip install "av<19"'
+            )
 
     user_skill = info["skill_installed"]["user"]
     project_skill = info["skill_installed"]["project"]
