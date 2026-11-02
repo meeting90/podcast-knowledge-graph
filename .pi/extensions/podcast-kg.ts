@@ -108,16 +108,42 @@ function prependToPath(dir: string): void {
 	}
 }
 
-/** Run a command, streaming nothing; resolves to exit code (or -1). */
-function run(command: string, args: string[]): Promise<number> {
+type RunResult = { code: number; stderr: string };
+
+/**
+ * Run a command without streaming its output.
+ *
+ * `capture` keeps the tail of stderr so a failed boot can report the real
+ * reason: with `stdio: "ignore"` the only thing we ever learned was
+ * "退出码 2", which is not actionable from the user side.
+ */
+function run(command: string, args: string[], capture = false): Promise<RunResult> {
 	return new Promise((resolve) => {
-		const child = spawn(command, args, { stdio: "ignore", windowsHide: true });
+		const child = spawn(command, args, {
+			stdio: ["ignore", "ignore", capture ? "pipe" : "ignore"],
+			windowsHide: true,
+		});
+		let stderr = "";
+		child.stderr?.on("data", (chunk: Buffer | string) => {
+			stderr = (stderr + chunk.toString()).slice(-2000);
+		});
 		child.on("error", (error) => {
 			log(`${command} failed: ${error.message}`);
-			resolve(-1);
+			resolve({ code: -1, stderr: error.message });
 		});
-		child.on("close", (code) => resolve(code ?? -1));
+		child.on("close", (code) => resolve({ code: code ?? -1, stderr: stderr.trim() }));
 	});
+}
+
+/** One-line failure reason: exit code plus the last stderr lines. */
+function failure(step: string, result: RunResult): string {
+	const tail = result.stderr
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.slice(-2)
+		.join(" ");
+	return `${step}（退出码 ${result.code}${tail ? `：${tail}` : ""}）`;
 }
 
 const POSIX_SHIM = path.join(BIN_DIR, "podcast-kg");
@@ -202,17 +228,29 @@ async function ensureEnvironment(): Promise<Ready> {
 	log("首次运行：正在准备 Python 环境并安装依赖（faster-whisper、semantica）…");
 	try {
 		fs.mkdirSync(CACHE_DIR, { recursive: true });
-		const venvCode = uv
-			? await run(uv, ["venv", VENV_DIR, "--python", process.env.PODCAST_KG_PYTHON_VERSION || "3.12", "--seed", "--quiet"])
-			: await run(python!, ["-m", "venv", VENV_DIR]);
-		if (venvCode !== 0) throw new Error(`创建 venv 失败（退出码 ${venvCode}）`);
-
 		const venvPython = venvBin(IS_WIN ? "python.exe" : "python");
+		// Booting has to be safe to repeat. `uv venv` exits 2 whenever the
+		// directory already exists, which used to brick every later session: a
+		// first-run install failure left a half-built venv behind, and every
+		// retry died at "创建 venv 失败（退出码 2）" before it could write the shim.
+		// So only create when the interpreter is missing, and clear a broken one.
+		if (!isFile(venvPython)) {
+			const version = process.env.PODCAST_KG_PYTHON_VERSION || "3.12";
+			const created = uv
+				? await run(uv, ["venv", VENV_DIR, "--python", version, "--seed", "--quiet", "--clear"], true)
+				: await run(python!, ["-m", "venv", "--clear", VENV_DIR], true);
+			if (created.code !== 0) throw new Error(failure("创建 venv 失败", created));
+		}
+
+		// The non-uv branch used to slice off "-m" and run `<python> pip install`,
+		// i.e. execute a file named `pip`; both branches now pass the same args.
 		const installArgs = uv
 			? ["pip", "install", "--python", venvPython, `${PACKAGE_ROOT}[all]`]
 			: ["-m", "pip", "install", "--quiet", `${PACKAGE_ROOT}[all]`];
-		const installCode = uv ? await run(uv, installArgs) : await run(venvPython, installArgs.slice(1));
-		if (installCode !== 0) throw new Error(`安装 podcast-kg[all] 失败（退出码 ${installCode}）`);
+		const installed = uv
+			? await run(uv, installArgs, true)
+			: await run(venvPython, installArgs, true);
+		if (installed.code !== 0) throw new Error(failure("安装 podcast-kg[all] 失败", installed));
 
 		const cli = isFile(venvBin("podcast-kg.exe")) ? venvBin("podcast-kg.exe") : venvBin("podcast-kg");
 		if (!isFile(cli)) throw new Error("安装完成但找不到 podcast-kg 可执行文件");
@@ -226,9 +264,13 @@ async function ensureEnvironment(): Promise<Ready> {
 			note: `依赖已就绪（venv: ${VENV_DIR}）`,
 		};
 	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		log(message);
 		ready = {
 			ok: false,
-			note: `环境准备失败：${error instanceof Error ? error.message : String(error)}。可手动运行 podcast-kg doctor 查看详情。`,
+			// "运行 podcast-kg doctor" is circular advice here: that is exactly
+			// the thing that is missing. Point at the cache, which repairs it.
+			note: `环境准备失败：${message}。删掉 ${CACHE_DIR} 后重开 Pi 可重建。`,
 		};
 	}
 	return ready;
