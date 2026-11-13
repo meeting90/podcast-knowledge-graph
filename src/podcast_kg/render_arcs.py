@@ -22,13 +22,20 @@ def mmss(sec: int) -> str:
     return f"{sec // 60}:{sec % 60:02d}"
 
 
-def to_sec(stamp: str) -> int:
-    parts = [int(p) for p in str(stamp).split(":") if p != ""]
+def to_sec(stamp: str) -> float:
+    """弧的时间戳可能带小数秒（词边界）：`1:04:17.98`。"""
+    parts = [float(p) for p in str(stamp).split(":") if p != ""]
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    return parts[0] if parts else 0
+    return parts[0] if parts else 0.0
+
+
+def disp(stamp: str) -> str:
+    """对外显示时去掉小数秒：小数是给播放器用的，读者不需要看。"""
+    text = str(stamp)
+    return text.split(".")[0] if "." in text else text
 
 
 CSS = """
@@ -259,7 +266,7 @@ def render(data: dict, curated: dict | None = None, source_label: str = "") -> s
     w('<nav class="toc">')
     w('<div class="h">段落目录</div>')
     for a in arcs:
-        w(f'<a href="#{esc(a["arc_id"])}"><span class="t">{esc(a["start"])} · {mmss(a["duration_sec"])}</span>'
+        w(f'<a href="#{esc(a["arc_id"])}"><span class="t">{esc(disp(a["start"]))} · {mmss(a["duration_sec"])}</span>'
           f'{esc((curated.get(a["arc_id"], {}) or {}).get("title") or a["title"])}</a>')
     w("</nav>")
 
@@ -281,7 +288,7 @@ def render(data: dict, curated: dict | None = None, source_label: str = "") -> s
         w(f'<span class="idx">{i:02d}</span>')
         w(f"<h2>{esc(a_title)}</h2>")
         w("</div>")
-        meta_bits = [f'{a["start"]} – {a["end"]}', mmss(a["duration_sec"]),
+        meta_bits = [f'{disp(a["start"])} – {disp(a["end"])}', mmss(a["duration_sec"]),
                      f'{len(a.get("evidence", []))} 条原始观点']
         if main_speaker:
             meta_bits.append(f"发言：{main_speaker}")

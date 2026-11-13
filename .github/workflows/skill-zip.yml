@@ -1,0 +1,43 @@
+name: skill-zip
+
+# Builds the Agensi-ready skill ZIP and attaches it to a GitHub Release.
+# The ZIP never enters git history: dist/ is git-ignored and releases carry
+# the binary asset, so the repository stays text-only.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and validate the skill ZIP
+        run: |
+          python scripts/package_skill.py --json | tee package-report.json
+          python scripts/package_skill.py --check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: podcast-knowledge-graph-skill
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Attach the ZIP to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
+          gh release upload "$TAG" dist/*.zip --clobber

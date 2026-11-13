@@ -7,8 +7,8 @@
  *   1. prepares a private Python environment with **all** dependencies
  *      (`uv pip install "<root>[all]"`) the first time a session starts, then
  *      puts a `podcast-kg` shim on PATH for the bash tool;
- *   2. appends `APPEND_SYSTEM.md` to the system prompt (CLI is `--help`-driven);
- *   3. contributes the bundled skill from `.pi/skills/`;
+ *   2. appends `.pi/APPEND_SYSTEM.md` to the system prompt (CLI is `--help`-driven);
+ *   3. contributes the bundled skill from `skills/`;
  *   4. exposes `/podcast-kg` for environment checks (`/podcast-kg doctor`).
  */
 
@@ -21,8 +21,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, "..", "..");
-const SKILLS_DIR = path.join(PACKAGE_ROOT, ".pi", "skills");
-const APPEND_FILE = path.join(PACKAGE_ROOT, "APPEND_SYSTEM.md");
+const SKILLS_DIR = path.join(PACKAGE_ROOT, "skills");
+const APPEND_FILE = path.join(PACKAGE_ROOT, ".pi", "APPEND_SYSTEM.md");
 const MARKER = "podcast-kg";
 
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
@@ -197,7 +197,7 @@ function writeShim(cliPath: string): void {
 }
 
 /**
- * Make the Python CLI available. Everything (CLI + faster-whisper + semantica)
+ * Make the Python CLI available. Everything (CLI + faster-whisper)
  * is installed into a private venv on first run, so later sessions are instant.
  */
 async function ensureEnvironment(): Promise<Ready> {
@@ -225,7 +225,7 @@ async function ensureEnvironment(): Promise<Ready> {
 		return ready;
 	}
 
-	log("首次运行：正在准备 Python 环境并安装依赖（faster-whisper、semantica）…");
+	log("首次运行：正在准备 Python 环境并安装依赖（faster-whisper）…");
 	try {
 		fs.mkdirSync(CACHE_DIR, { recursive: true });
 		const venvPython = venvBin(IS_WIN ? "python.exe" : "python");

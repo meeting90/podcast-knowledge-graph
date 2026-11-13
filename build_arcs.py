@@ -10,7 +10,9 @@
 
 输入
   --cards-dir   知识卡目录（*.json，只认带 content_id 且有 claims 的）
-  --curated     精修稿：{content_id: {arc_id: {title, summary}}}（可选）
+  --curated     精修稿：{content_id: {arc_id: {title, summary, open_question, open_line}}}
+                另可写 `_breaks: [{before: c69, at: "1:04:18"}]` 人工指定话题边界：
+                停顿/分组/主持人轮转全都失效时用（例：主持人中途说「最后我问一个点」）
   --out-dir     产物目录（默认 <cards-dir>/arcs）
 
 输出
@@ -34,6 +36,27 @@ from podcast_kg.render_arcs import render  # noqa: E402
 # 文件名按 content_id 对应，转写稿同样放在 .outputs/ 下，不入库。
 TRANSCRIPT_DIR = ".outputs"
 
+# 精修稿里能直接覆盖到弧本身的人工字段（不只影响 HTML，JSON 也要带上）
+CURATED_FIELDS = ("title", "summary", "open_question", "open_line")
+
+
+def _load_words(path: str) -> list[dict]:
+    """词级时间戳：弧的起止点靠它对齐到词边界（没有这个文件就跳过对齐）。"""
+    from podcast_kg.arcs import load_words
+
+    words = load_words(path)
+    print(f"  词级对齐：{len(words)} 个词（{os.path.basename(path)}）")
+    return words
+
+
+def apply_curated(data: dict, cur: dict) -> None:
+    """把人工标题 / 摘要 / 开场问句写进弧本身，JSON 与 HTML 用同一份文字。"""
+    for arc in data.get("arcs", []):
+        entry = cur.get(arc.get("arc_id")) or {}
+        for key in CURATED_FIELDS:
+            if entry.get(key):
+                arc[key] = entry[key]
+
 
 def is_card(path: str) -> bool:
     try:
@@ -43,25 +66,51 @@ def is_card(path: str) -> bool:
     return isinstance(data, dict) and bool(data.get("content_id")) and bool(data.get("claims"))
 
 
-def transcript_for(content_id: str) -> str | None:
-    """转写稿按音频名命名，与 content_id 不一定一致，所以先查映射表。
+def _mapped(content_id: str, kind: str) -> str | None:
+    """按映射表找某类产物（transcript / words），也接受 `<content_id>_<kind>` 直推。
 
     映射表长这样（放在 .outputs/transcripts.json，随数据走、不入库）：
-      {"xiaoyuzhoufm_20260328_296": "lijia_transcript.txt"}
+      {"xiaoyuzhoufm_20260328_296": "lijia_transcript.txt"}                # 老写法
+      {"xiaoyuzhoufm_...": {"transcript": "x_transcript.txt", "words": "x_words.json"}}
     """
+    fallbacks = {"transcript": ("_transcript.txt",), "words": ("_words.json",)}[kind]
     for base in (TRANSCRIPT_DIR, ".outputs"):
         mapping_path = os.path.join(base, "transcripts.json")
         if os.path.isfile(mapping_path):
             mapping = json.load(open(mapping_path, encoding="utf-8"))
-            name = mapping.get(content_id)
-            if name:
+            entry = mapping.get(content_id)
+            names = []
+            if isinstance(entry, dict):
+                if entry.get(kind):
+                    names.append(entry[kind])
+            elif isinstance(entry, str) and kind == "transcript":
+                # 老写法只有转写稿；词级文件靠同名替换推
+                names.append(entry)
+                for suffix in fallbacks:
+                    if entry.endswith("_transcript.txt"):
+                        names.append(entry.replace("_transcript.txt", suffix))
+            elif isinstance(entry, str):
+                for suffix in fallbacks:
+                    if entry.endswith("_transcript.txt"):
+                        names.append(entry.replace("_transcript.txt", suffix))
+            for name in names:
                 candidate = os.path.join(base, name)
                 if os.path.isfile(candidate):
                     return candidate
-        direct = os.path.join(base, f"{content_id}_transcript.txt")
-        if os.path.isfile(direct):
-            return direct
+        for suffix in fallbacks:
+            direct = os.path.join(base, f"{content_id}{suffix}")
+            if os.path.isfile(direct):
+                return direct
     return None
+
+
+def transcript_for(content_id: str) -> str | None:
+    return _mapped(content_id, "transcript")
+
+
+def words_for(content_id: str) -> str | None:
+    """词级时间戳（`transcribe --words` 产出）：弧的时间戳靠它对齐到词边界。"""
+    return _mapped(content_id, "words")
 
 
 def main() -> int:
@@ -85,8 +134,11 @@ def main() -> int:
     for path in cards:
         card = json.load(open(path, encoding="utf-8"))
         cid = card["content_id"]
-        data = build_file(path, transcript_for(cid))
         cur = curated.get(cid, {})
+        words_path = words_for(cid)
+        words = _load_words(words_path) if words_path else None
+        data = build_file(path, transcript_for(cid), breaks=cur.get("_breaks"), words=words)
+        apply_curated(data, cur)
 
         json.dump(
             data,

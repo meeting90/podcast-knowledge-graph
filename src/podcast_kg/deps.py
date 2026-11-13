@@ -22,7 +22,6 @@ import sys
 
 _HINT = {
     "faster_whisper": "faster-whisper>=1.0.0",
-    "semantica": "semantica>=0.7.0",
 }
 
 

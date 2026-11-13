@@ -1,0 +1,37 @@
+name: pr-label
+
+# Labels a PR from its Conventional Commits title prefix so release notes can be
+# grouped by category (.github/release.yml). Runs on pull_request_target and
+# checks out the default branch only — no PR code is executed.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Apply the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          LABEL=$(python3 scripts/pr_label.py "$PR_TITLE")
+          if [ -z "$LABEL" ]; then
+            echo "no matching prefix; leaving the PR unlabelled"
+            exit 0
+          fi
+          gh label create "$LABEL" --force >/dev/null 2>&1 || true
+          gh pr edit "$PR_NUMBER" --add-label "$LABEL"
+          echo "labelled PR #$PR_NUMBER as $LABEL"

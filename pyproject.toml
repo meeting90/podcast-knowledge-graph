@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "podcast-kg"
 version = "0.1.0"
-description = "Timestamped, source-linked knowledge cards for podcasts: transcribe, verify, render, ingest — and install the matching Pi skill."
+description = "Timestamped, source-linked knowledge cards for podcasts: transcribe, verify, render, ingest — and install the matching agent skill anywhere."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "meeting90", url = "https://github.com/meeting90" }]
-keywords = ["podcast", "transcript", "knowledge-graph", "whisper", "pi", "skill"]
+keywords = ["podcast", "transcript", "knowledge-graph", "whisper", "agent-skills", "skill", "pi", "claude-code", "codex"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -24,9 +24,10 @@ dependencies = []
 # passes it, so every decode fails with "unexpected keyword argument".
 # Keep PyAV below 19 until faster-whisper drops the argument.
 transcribe = ["faster-whisper>=1.0.0", "av>=11,<19"]
-# `podcast-kg ingest` needs this; the CLI installs it on first use.
-graph = ["semantica>=0.7.0"]
-all = ["faster-whisper>=1.0.0", "av>=11,<19", "semantica>=0.7.0"]
+# Kept as an empty alias: `podcast-kg ingest` is stdlib-only since 0.1.0,
+# so `pip install "podcast-kg[graph]"` still resolves and needs nothing extra.
+graph = []
+all = ["faster-whisper>=1.0.0", "av>=11,<19"]
 
 [project.scripts]
 podcast-kg = "podcast_kg.cli:main"
@@ -37,17 +38,17 @@ Homepage = "https://github.com/meeting90/podcast-knowledge-graph"
 [tool.hatch.build.targets.wheel]
 packages = ["src/podcast_kg"]
 
-# Single source of truth lives next to the Pi manifest; both the Pi package
-# (.pi/...) and `podcast-kg setup` (pip install) read the same files.
+# Single source of truth lives at `skills/` (the Agent Skills convention), so the
+# same folder works for Pi, Claude Code and `podcast-kg install-skill`; the wheel
+# maps it to `podcast_kg/skill`.
 [tool.hatch.build.targets.wheel.force-include]
-".pi/skills/podcast-knowledge-graph" = "podcast_kg/skill"
-"APPEND_SYSTEM.md" = "podcast_kg/APPEND_SYSTEM.md"
+"skills/podcast-knowledge-graph" = "podcast_kg/skill"
 
 [tool.hatch.build.targets.sdist]
 include = [
   "src",
+  "skills",
   ".pi",
-  "APPEND_SYSTEM.md",
   "package.json",
   "pyproject.toml",
   "README.md",

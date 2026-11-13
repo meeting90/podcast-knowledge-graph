@@ -1,0 +1,13 @@
+{
+  "package": "podcast-kg",
+  "version": "0.1.0",
+  "extras": [
+    "all"
+  ],
+  "requires_python": ">=3.10",
+  "entry": "podcast-kg",
+  "bootstrap": "bin/bootstrap.py",
+  "install_from_git": "git+https://github.com/meeting90/podcast-knowledge-graph",
+  "git_rev": "",
+  "note": "装 skill ≠ 装运行时。CLI 不可用时先跑 bin/bootstrap.py（幂等，只装到私有 venv）。"
+}

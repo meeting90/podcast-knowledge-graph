@@ -7,6 +7,7 @@
     ├── <content_id>.json / .md           知识卡（由 agent 写入）
     ├── <content_id>.html                 渲染出的观点页
     ├── <content_id>_graph.json           图谱快照
+    ├── <content_id>.<lang>.json          译文卡（结构一致，只换文字）
     └── registry/                         实体 / 人物 / 概念注册表
 
 显式传入输出路径时以传入路径为准。

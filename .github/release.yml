@@ -1,0 +1,23 @@
+# Release notes categories for `gh release create --generate-notes`.
+# PRs are labelled by .github/workflows/pr-label.yml based on the title prefix
+# (feat: / fix: / docs: / chore: …). Add `skip-changelog` to hide a PR.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: "🚀 Features"
+      labels:
+        - feature
+    - title: "🐛 Fixes"
+      labels:
+        - bug
+    - title: "📝 Documentation"
+      labels:
+        - documentation
+    - title: "🧰 Maintenance"
+      labels:
+        - chore
+    - title: "Other changes"
+      labels:
+        - "*"

@@ -1,0 +1,101 @@
+name: release
+
+# Tag + GitHub Release after a version-bumped PR is merged.
+# The version lives in pyproject.toml, src/podcast_kg/__init__.py,
+# skills/.../runtime.json and skills/.../bin/bootstrap.py; bump it in the PR:
+#   python scripts/bump_version.py minor
+# Merging that PR creates tag v<version> and a release with the skill ZIP.
+#
+# A tag pushed by GITHUB_TOKEN does not trigger other workflows, so this job
+# builds and uploads the ZIP itself (the skill-zip workflow still covers
+# manually pushed tags).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (X.Y.Z). Leave empty to use pyproject.toml."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Runs after every merge to main. If v<version> already exists this is a
+    # no-op, so merging a PR that does not bump the version changes nothing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version
+        id: v
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          V=$(python scripts/bump_version.py --print)
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            if [ "$INPUT_VERSION" != "$V" ]; then
+              echo "::error::requested version $INPUT_VERSION does not match pyproject.toml ($V)"
+              exit 1
+            fi
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the four version locations
+        run: |
+          set -euo pipefail
+          python scripts/bump_version.py --check
+
+      - name: Does the tag already exist?
+        id: tag
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${{ steps.v.outputs.tag }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag ${{ steps.v.outputs.tag }} already exists — nothing to release"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the skill ZIP
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          python scripts/package_skill.py --json | tee package-report.json
+          python scripts/package_skill.py --check
+
+      - name: Tag and create the release
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.v.outputs.tag }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" dist/*.zip \
+            --title "$TAG" \
+            --generate-notes
+
+      - uses: actions/upload-artifact@v4
+        if: steps.tag.outputs.exists == 'false'
+        with:
+          name: skill-zip
+          path: dist/*.zip

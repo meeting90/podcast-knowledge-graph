@@ -1,1041 +1,1157 @@
-#!/usr/bin/env python3
-"""HERON · 知识卡 JSON → 单文件 HTML（与 heron 站点同款版式）
+"""HERON · 知识卡 JSON → 单文件 HTML（与 heronai.top 详情页同一套 DOM 与样式）
 
-版式（对齐 heron 详情页）:
-  毛玻璃顶栏 → 刊头（平台/日期/标题/嘉宾/统计）
-  → 工具条（全部 / 我的推荐 / 编辑推荐）
-  → 左侧 sticky 主题导航 + 右侧观点行列表（展开看关系与语料）
-  → 底部悬浮播放条（点时间戳回链原声）
+版式来源
+--------
+样式直接从站点取（`assets/heron.css`，字体子集已内联），本文件只负责**按同样的
+class 生成同样的结构**，所以本地导出的页面和 heronai.top/cards/<id> 看起来是同一版：
 
-交互:
-  - 点行 = 展开/收起；点行内播放钮/星标不冒泡
-  - 点时间戳 = 播放该 claim 区间，播到 end 自动暂停
-  - ★ 编辑推荐 → 复制 JSON，回填 card["picks"]
+  顶栏 topbar → 卡片头 detail-hero（平台/日期、标题、人物、段数·观点数·原节目）
+  → 工具条 om-bar（全部 / 我的推荐）→ 左侧 om-nav 主题导航 + 右侧话题弧 av-arc
+  → 评论区 cm → 播放时浮出的 playerbar
+
+两种阅读单位
+------------
+* 卡里有 `arcs`（HERON 把话题弧合回 `cards.card` 后就是这个形状）→ 每个分组下渲染
+  `av-arc` 卡片：标题、摘要、听这段、证据条数；展开后是「主持人开场原话 → 这一段
+  讲了什么（beats）→ 金句（points）→ 其余观点」，再往下才是逐句 claim。
+* 卡里没有 `arcs` → 退回逐句视图（`om-row`），与 heron 的「全部观点」视图一致。
+
+`podcast-kg render` 会自动旁挂 `<card>_arcs.json`（`build_arcs.py` 的产物），
+也可以用 `--arcs PATH` 显式指定。
 """
+
+from __future__ import annotations
+
+import html
 import json
 import os
 import re
-
-from .outputs import ensure_parent, out_path, stem
 
 REL_CN = {"supports": "支撑", "supported_by": "被支撑", "example_of": "例证", "exemplified_by": "例证于",
           "extends": "引申", "extended_by": "被引申", "deepens": "深化", "deepened_by": "被深化",
           "tension_with": "张力", "responds_to": "回应", "parallel": "并列", "implies": "推出",
           "precondition": "前提", "part_of": "属于", "echoes": "呼应", "echoed_by": "被呼应",
-          "related": "关联", "contrast": "对比", "followed_by": "递进", "aligns_with": "呼应"}
-
+          "related": "关联", "contrast": "对比", "causes": "导致"}
 REL_COLOR = {"supports": "#3b5bdb", "deepens": "#0b7285", "extends": "#2f9e44",
-             "echoes": "#9c36b5", "responds_to": "#e8590c", "tension_with": "#c92a2a",
-             "implies": "#5f3dc4", "part_of": "#868e96", "precondition": "#f08c00",
-             "parallel": "#adb5bd", "exemplified_by": "#0c8599", "contrast": "#c2255c"}
-
+             "tension_with": "#c2255c", "responds_to": "#9c36b5", "parallel": "#e8590c",
+             "implies": "#5f3dc4", "precondition": "#087f5b", "part_of": "#868e96",
+             "echoes": "#1971c2", "exemplified_by": "#f08c00", "example_of": "#f08c00"}
+# 与站点一致的分类色板（om-nav / om-dot 用）
 GROUP_COLORS = ["#3b5bdb", "#0b7285", "#e8590c", "#2f9e44", "#9c36b5", "#c2255c", "#5f3dc4", "#087f5b"]
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+SITE = "https://heronai.top"
 
-# ---------------------------------------------------------------- helpers
+# ── 多语言 ───────────────────────────────────────────────────────────────────
+# 渲染时用 `T()` 包住可翻译字段：字符串照旧输出；`{lang: text}` 输出成带
+# `data-zh` / `data-en` 的 span，前端切语言只改 textContent，DOM 与 id 不变。
+_LANGS: list[str] = ["zh"]
+_DEFAULT = "zh"
+LANG_LABEL = {"zh": "中文", "en": "EN"}
 
-def esc(s):
-    return (str(s if s is not None else "")
-            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+CHROME: dict[str, tuple[str, str]] = {
+    "back": ("返回列表", "Back"),
+    "submit": ("内容投稿", "Submit"),
+    "theme": ("主题", "Theme"),
+    "all": ("全部", "All"),
+    "mine": ("我的推荐", "My picks"),
+    "share": ("分享我的视图", "Share my view"),
+    "export": ("导出 picks", "Export picks"),
+    "export_title": ("把推荐导出成 JSON，回填到卡片", "Export picks as JSON"),
+    "hint_arcs": ("共 {n} 段 · {m} 条观点（按话题弧分组）", "{n} segments · {m} claims, grouped by topic arcs"),
+    "hint_claims": ("共 {m} 条观点，按主题分组", "{m} claims, grouped by theme"),
+    "ungrouped": ("未入组 {n} 条", "{n} ungrouped"),
+    "n_segments": ("{n} 段", "{n} segments"),
+    "n_claims": ("{n} 条观点", "{n} claims"),
+    "claims_count": ("{n} 观点", "{n} claims"),
+    "original": ("原始节目 ↗", "Original episode ↗"),
+    "mentioned": ("节目里提到的 {n} 人", "{n} people mentioned"),
+    "nav": ("目录", "Contents"),
+    "nav_count": ("目录 · {n} 段", "Contents · {n}"),
+    "close": ("关闭", "Close"),
+    "open_label": ("主持人开场原话", "Host's opening"),
+    "beats_label": ("这一段讲了什么", "What this segment covers"),
+    "points_label": ("金句 {n} 句", "{n} key quotes"),
+    "rest_label": ("其余观点 {n} 条", "{n} more claims"),
+    "evidence": ("语料", "Source line"),
+    "listen": ("听这段", "Listen"),
+    "auto_title": ("标题由算法截取，未经人工润色", "auto title"),
+    "minutes": ("{n} 分钟", "{n} min"),
+    "n_evidence": ("{n} 条证据", "{n} evidence"),
+    "expand": ("展开这一段", "Expand"),
+    "comments": ("评论", "Comments"),
+    "comments_sub": ("看到某一集、某一段、某句话有想法，就在那里写下来。",
+                     "Thoughts on an episode, a segment or a sentence? Write them there."),
+    "comments_hint": ("本地导出的页面没有评论后端；想参与讨论请到 heronai.top 的这张卡。",
+                      "This exported page has no comment backend; join the discussion on heronai.top."),
+    "local_hint": ("本地导出的单文件页面：推荐存在你自己的浏览器里，不会上传；带推荐的链接可以直接分享给别人。",
+                   "Single-file export: picks stay in your browser; shared links carry them along."),
+    "player_pick": ("选一段开始听", "Pick a segment to start"),
+    "player_redirect": ("点任一段的「听这段」复制定位提示", "Click “Listen” to copy a cue"),
+    "empty": ("这张卡没有可展示的观点。", "No claims to show."),
+    "lang_group": ("语言", "Language"),
+    "filter": ("筛选", "Filter"),
+    "all_claims": ("全部观点", "All claims"),
+    "card_fallback": ("知识卡", "Knowledge card"),
+    "description": ("{title} — HERON 知识卡：每个观点回溯到它被说出的那一秒。",
+                    "{title} — HERON knowledge card: every claim links back to the second it was said."),
+    "home": ("HERON 首页", "HERON home"),
+    "pb_clip": ("片段 {a}–{b}", "clip {a}–{b}"),
+    "pb_cont": ("继续播放", "continue"),
+}
 
 
-def esc_attr(s):
-    return esc(s).replace('"', "&quot;")
+def C(key: str, **fmt) -> dict[str, str]:
+    zh, en = CHROME[key]
+    return {"zh": zh.format(**fmt) if fmt else zh, "en": en.format(**fmt) if fmt else en}
 
 
-def jss(v):
-    """把值转成可嵌入单引号 JS 字符串 / 双引号属性的安全文本。"""
-    return (str(v if v is not None else "")
-            .replace("\\", "\\\\").replace("'", "\\'")
-            .replace('"', "&quot;").replace("\n", " ").replace("\r", " "))
+def set_langs(langs: list[str] | None, default: str | None = None) -> None:
+    global _LANGS, _DEFAULT
+    _LANGS = list(langs or ["zh"])
+    _DEFAULT = default if default in _LANGS else _LANGS[0]
 
 
-def js(obj):
-    """嵌入 <script> 的 JSON：转义闭合标签，避免提前截断。"""
-    return json.dumps(obj, ensure_ascii=False).replace("</", "<\\/")
+def _filled(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def TX(value) -> str:
+    """取默认语言的纯文本（用于 JS 数据、属性）。"""
+    if isinstance(value, dict):
+        if _filled(value.get(_DEFAULT)):
+            return value[_DEFAULT]
+        for lang in _LANGS:
+            if _filled(value.get(lang)):
+                return value[lang]
+        return ""
+    return "" if value is None else str(value)
+
+
+def T(value) -> str:
+    """输出可翻译文本：纯字符串直接转义；多语言输出带 data-<lang> 的 span。"""
+    if isinstance(value, dict):
+        texts = {lang: value[lang] for lang in _LANGS if _filled(value.get(lang))}
+        if not texts:
+            return ""
+        default = _DEFAULT if _DEFAULT in texts else next(iter(texts))
+        attrs = " ".join(f'data-{lang}="{esc_attr(text)}"' for lang, text in texts.items())
+        return f'<span class="i18n" {attrs}>{esc(texts[default])}</span>'
+    return esc(value)
+
+
+def T_ATTRS(value) -> str:
+    """把多语言文本变成可挂在任意元素上的 `data-zh="…" data-en="…"`。"""
+    if not isinstance(value, dict):
+        return ""
+    return " ".join(
+        f'data-{lang}="{esc_attr(value[lang])}"'
+        for lang in _LANGS
+        if _filled(value.get(lang))
+    )
+
+
+def TA(value, attr: str = "title") -> str:
+    """输出多语言属性：`title="当前语言" data-title-en="..."`。"""
+    if not isinstance(value, dict):
+        return f'{attr}="{esc_attr(value or "")}"'
+    texts = {lang: value[lang] for lang in _LANGS if _filled(value.get(lang))}
+    if not texts:
+        return f'{attr}=""'
+    default = _DEFAULT if _DEFAULT in texts else next(iter(texts))
+    attrs = [f'{attr}="{esc_attr(texts[default])}"']
+    attrs += [f'data-{attr}-{lang}="{esc_attr(text)}"' for lang, text in texts.items()]
+    return " ".join(attrs)
+
+
+# JS 侧文案：切换语言时 toast / 提示 / 播放条都要跟着变。
+JS_I18N: dict[str, dict[str, str]] = {
+    "zh": {
+        "theme_dark": "切到深色", "theme_light": "切到浅色",
+        "seg_all": "全部", "seg_mine": "我的推荐",
+        "share": "分享我的视图", "export": "导出 picks",
+        "mine_hint": "只看我推荐的，共 {n} 条",
+        "mine_empty": "（还没推荐过，点 ★ 加入）",
+        "n_segments": "{n} 段", "n_claims": "{n} 条观点",
+        "play_title": "播放 {t} 这一段",
+        "star_on": "已推荐 · 点击取消", "star_arc": "推荐这一段", "star_claim": "推荐这条观点",
+        "expand": "展开这一段", "collapse": "收起",
+        "player_pick": "选一段开始听",
+        "no_audio": "这张卡没有可播放的音频地址，用「原始节目」去听",
+        "autoplay": "浏览器拦了自动播放，点播放条 ▶ 即可",
+        "finished": "这一段听完了",
+        "share_done": "已复制：带推荐的链接",
+        "export_done": "已导出 picks_{id}.json",
+        "picks_view": "这是别人分享的推荐视图（{n} 条）",
+        "locate": "定位：{where}　→ 到原平台拖到该处",
+        "audio_err": "音频无法播放：{why}",
+        "err_1": "加载被中断", "err_2": "网络错误", "err_3": "解码失败",
+        "err_4": "格式不支持或地址不可达", "err_0": "未知错误",
+        "pick_first": "先从上面选一段",
+        "nav_more": "目录", "nav_close": "关闭",
+    },
+    "en": {
+        "theme_dark": "Switch to dark", "theme_light": "Switch to light",
+        "seg_all": "All", "seg_mine": "My picks",
+        "share": "Share my view", "export": "Export picks",
+        "mine_hint": "Only my picks · {n} total",
+        "mine_empty": "(nothing yet — click ★ to add)",
+        "n_segments": "{n} segments", "n_claims": "{n} claims",
+        "play_title": "Play {t}",
+        "star_on": "Recommended · click to remove", "star_arc": "Recommend this segment", "star_claim": "Recommend this claim",
+        "expand": "Expand", "collapse": "Collapse",
+        "player_pick": "Pick a segment to start",
+        "no_audio": "This card has no playable audio; use “Original episode”",
+        "autoplay": "Autoplay was blocked — press ▶ on the player bar",
+        "finished": "Segment finished",
+        "share_done": "Copied: link with your picks",
+        "export_done": "Exported picks_{id}.json",
+        "picks_view": "Shared picks view ({n} items)",
+        "locate": "Cue: {where} → seek there on the source platform",
+        "audio_err": "Audio failed: {why}",
+        "err_1": "loading aborted", "err_2": "network error", "err_3": "decode failed",
+        "err_4": "unsupported format or unreachable URL", "err_0": "unknown error",
+        "pick_first": "Pick a segment above first",
+        "nav_more": "Contents", "nav_close": "Close",
+    },
+}
+
+
+def esc(s) -> str:
+    return html.escape("" if s is None else str(s))
+
+
+def esc_attr(s) -> str:
+    return html.escape("" if s is None else str(s), quote=True)
+
+
+def js(obj) -> str:
+    """嵌进 <script> 的 JSON：转义闭合标签，避免提前截断。"""
+    text = json.dumps(obj, ensure_ascii=False).replace("</", "<\\/")
+    return text.replace("<!--", "<\\u0021--")
 
 
 def strip_group_no(name):
-    """「① 产品与工程」→「产品与工程」"""
+    """「① 产品与工程」→「产品与工程」；多语言时逐语言处理。"""
+    if isinstance(name, dict):
+        return {lang: strip_group_no(text) for lang, text in name.items()}
     out = re.sub(r"^[\d①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]+[.\s、)）]?\s*", "", str(name or "")).strip()
     return out or str(name or "")
 
 
-def to_sec(t):
-    if not t:
-        return 0
-    q = [int(x) for x in re.findall(r"\d+", str(t))]
+def to_sec(t) -> int:
+    """`1:04:18.72` / `64:18` / `1:04:18` 都认；小数直接截断。"""
+    q = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", str(t or ""))]
     if len(q) == 3:
-        return q[0] * 3600 + q[1] * 60 + q[2]
+        return int(q[0] * 3600 + q[1] * 60 + q[2])
     if len(q) == 2:
-        return q[0] * 60 + q[1]
-    return q[0] if q else 0
+        return int(q[0] * 60 + q[1])
+    return int(q[0]) if q else 0
 
 
-def mmss(sec):
-    sec = max(0, int(sec))
+def mmss(sec) -> str:
+    sec = max(0, int(sec or 0))
     h, rem = divmod(sec, 3600)
     m, s = divmod(rem, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def build_groups(card):
+def disp(stamp) -> str:
+    """展示用时间戳：去掉词边界对齐带上的小数秒。"""
+    text = str(stamp or "")
+    return text.split(".")[0] if "." in text else text
+
+
+def load_css() -> str:
+    path = os.path.join(HERE, "assets", "heron.css")
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+# 站点上没有的部分：导出页专用的提示条与几处小修正。
+LOCAL_CSS = """
+.langsw{display:flex;align-items:center;border:1px solid currentColor;border-radius:99px;overflow:hidden;opacity:.85}
+.langsw button{border:0;background:transparent;color:inherit;font:inherit;font-size:12px;
+  padding:4px 10px;cursor:pointer;opacity:.7}
+.langsw button[aria-pressed="true"]{background:var(--fg);color:var(--bg);opacity:1}
+#toast{position:fixed;left:50%;bottom:92px;transform:translate(-50%,12px);z-index:60;
+  background:var(--fg);color:var(--bg);border-radius:99px;padding:9px 18px;font-size:13px;
+  max-width:min(560px,calc(100vw - 32px));text-align:center;pointer-events:none;
+  opacity:0;transition:opacity .18s var(--ease-out),transform .18s var(--ease-out)}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+/* 站点用 React 条件渲染：折叠时不输出正文。静态页把同一件事交给 CSS。 */
+.av-arc-body{display:none}
+.av-arc.open .av-arc-body{display:block}
+.om-more{display:none}
+.om-row.open .om-more{display:block}
+.no-chrome .om-bar{display:none}
+body.has-player .page{padding-bottom:150px}
+@media(max-width:760px){nav.om-nav{position:sticky}}
+"""
+
+
+def load_segments(card: dict, seg_dir) -> tuple[dict, str]:
+    """可选的内联音频片段：<seg_dir>/<claim_id>.mp3 → {claim_id: {b64, dur}}"""
+    if not seg_dir or not os.path.isdir(seg_dir):
+        return {}, card.get("source", {}).get("audio_url", "") or ""
+    import base64
+
+    out = {}
+    for name in sorted(os.listdir(seg_dir)):
+        stem, ext = os.path.splitext(name)
+        if ext.lower() not in (".mp3", ".m4a", ".wav", ".opus", ".ogg"):
+            continue
+        with open(os.path.join(seg_dir, name), "rb") as fh:
+            out[stem] = {"b64": base64.b64encode(fh.read()).decode(), "dur": 0}
+    return out, ""
+
+
+def build_groups(card: dict) -> list[tuple[str, str, list[str]]]:
     if card.get("groups"):
         return [(g["gid"], g["name"], list(g.get("ids", []))) for g in card["groups"]]
-    claims = card["claims"]
-    n = len(claims)
-    parts = 4 if n >= 20 else 3
-    size = -(-n // parts)
-    out = []
-    for i in range(parts):
-        chunk = claims[i * size:(i + 1) * size]
-        if not chunk:
+    return [("g1", "全部观点", [c["claim_id"] for c in card.get("claims", [])])]
+
+
+def load_arcs(card: dict, explicit: str | None = None, card_path: str | None = None) -> list[dict]:
+    """话题弧：卡的 `arcs` 字段 → `--arcs` 指定的文件 → 卡旁的 `<stem>_arcs.json`。
+
+    HERON 那边是先把弧合回 `cards.card` 再存；本地跑时弧通常是 `build_arcs.py`
+    写在兄弟文件里的，所以这里顺手旁挂一下，免得每次都要手动合。
+    """
+    if card.get("arcs"):
+        return list(card["arcs"])
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    if card_path:
+        stem, _ = os.path.splitext(card_path)
+        folder = os.path.dirname(card_path)
+        candidates.append(stem + "_arcs.json")
+        # build_arcs.py 默认把弧写到 <cards-dir>/arcs/
+        candidates.append(os.path.join(folder, "arcs", os.path.basename(stem) + "_arcs.json"))
+    for path in candidates:
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
             continue
-        out.append((f"g{i+1}", f"{i+1} · {chunk[0]['timestamp']} 起", [c["claim_id"] for c in chunk]))
-    return out
+        arcs = data.get("arcs") if isinstance(data, dict) else data
+        if arcs:
+            return list(arcs)
+    return []
 
 
-def load_segments(card, seg_dir):
-    """读取 seg_dir 下的 {cid}.mp3，转 base64，返回 {cid:{b64,dur,start,end}}。
-    约定：文件名前缀为 claim_id，例如 1_c21.mp3 / c21.mp3 均可。"""
-    segs = {}
-    audio_url = card["source"].get("audio_url", "")
-    if not seg_dir:
-        return segs, audio_url
-    import base64
-    import glob
-    import os
-    meta = {c["claim_id"]: (c.get("timestamp", ""), c.get("end", "")) for c in card["claims"]}
-    for f in sorted(glob.glob(os.path.join(seg_dir, "*.mp3"))):
-        cid = os.path.splitext(os.path.basename(f))[0].split("_")[-1]
-        if cid not in meta:
-            continue
-        with open(f, "rb") as fh:
-            b64 = base64.b64encode(fh.read()).decode()
-        st, en = meta[cid]
-        segs[cid] = {"b64": b64, "start": st, "end": en,
-                     "dur": max(0, to_sec(en) - to_sec(st))}
-    return segs, audio_url
+def _people_split(card: dict):
+    """host/guest 参与人 + mentioned（heron 把「提到的人」折叠在 details 里）。"""
+    main, mentioned = [], []
+    for p in card.get("people", []) or []:
+        role = TX(p.get("role")).strip().lower()
+        (main if role in ("host", "guest") else mentioned).append(p)
+    if not main:  # 卡里没标角色时，别把所有人塞进折叠区
+        main, mentioned = mentioned, []
+    return main, mentioned
 
 
-# ---------------------------------------------------------------- blocks
-
-def claim_row(c, speaker, rank=None, cid_attr=True, pick=False):
-    cid = c["claim_id"]
-    t = esc(c.get("timestamp", ""))
-    e = esc(c.get("end", ""))
-    rid = f' id="claim-{esc_attr(cid)}"' if cid_attr else ""
-    rank_html = f'<span class="om-rank num">{rank}</span>' if rank else ""
-
-    chips = []
-    for r in c.get("relations", []) or []:
-        rtype = r.get("type", "")
-        chips.append(
-            f'<button type="button" class="om-relbtn" '
-            f'onclick="event.stopPropagation();gotoClaim(\'{jss(r.get("target", ""))}\')" '
-            f'title="{esc_attr(r.get("note", ""))}">'
-            f'<i style="background:{REL_COLOR.get(rtype, "#868e96")}"></i>'
-            f'{esc(REL_CN.get(rtype, rtype))} <span class="num">{esc(r.get("target", ""))}</span></button>')
-    rels_html = f'<div class="om-rels">{"".join(chips)}</div>' if chips else ""
-
-    meta_bits = [x for x in (c.get("type"), c.get("confidence"), speaker) if x]
-    meta_html = " · ".join(esc(x) for x in meta_bits)
-    if t:
-        meta_html = (meta_html + " · " if meta_html else "") + f'<span class="num">{t}–{e}</span>'
-
-    ev = c.get("evidence")
-    ev_html = f'<div class="om-ev"><b>语料</b>{esc(ev)}</div>' if ev else ""
-
-    play_cls = "om-playbtn"
-    play_html = (
-        f'<button type="button" class="{play_cls}" title="播放 {t}–{e}" '
-        f'onclick="playClaim(event,\'{jss(cid)}\',\'{jss(t)}\',\'{jss(e)}\')">'
-        f'<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">'
-        f'<path d="M3 1.6v8.8l7-4.4z" fill="currentColor"/></svg>'
-        f'<span class="num">{t}</span></button>')
-
-    pick_cls = " is-pick" if pick else ""
+def _person_chip(p: dict) -> str:
+    name = p.get("name") or p.get("person_id") or "?"
     return (
-        f'<div class="om-row{pick_cls}"{rid} data-cid="{esc_attr(cid)}">'
-        f'<div class="om-row-h" role="button" tabindex="0" aria-expanded="false" '
-        f'onclick="toggleRow(this)" onkeydown="rowKey(event,this)">'
-        f'{rank_html}'
-        f'<span class="om-title"><span class="om-cid num">{esc(cid)}</span>{esc(c.get("statement", ""))}</span>'
-        f'<button type="button" class="om-star" title="加入/移出推荐" '
-        f'onclick="togglePick(event,\'{jss(cid)}\')">☆</button>'
-        f'{play_html}'
-        f'<span class="om-chev">'
-        f'<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">'
-        f'<path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" '
-        f'stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
-        f'</div>'
-        f'<div class="om-more">{rels_html}<div class="om-meta num">{meta_html}</div>{ev_html}'
-        f'<div class="om-note" hidden></div></div>'
-        f'</div>'
+        '<span class="dh-person"><span class="dh-avatar" aria-hidden="true">'
+        f'{esc(name[:1])}</span><span class="dh-pname">{esc(name)}</span>'
+        + (f'<span class="dh-prole">{T(p.get("role"))}</span>' if p.get("role") else "")
+        + "</span>"
     )
 
 
-# ---------------------------------------------------------------- template
+def _mentioned_chip(p: dict) -> str:
+    name = p.get("name") or p.get("person_id") or "?"
+    tip = p.get("identity") or p.get("org") or name
+    if isinstance(tip, list):
+        tip = "、".join(str(x) for x in tip)
+    return (f'<span class="dh-person dh-person-muted" {TA(tip)}>'
+            f'<span class="dh-pname">{esc(name)}</span></span>')
 
-CSS = r"""
-:root{
-  color-scheme:light dark;
-  --bg:#fafafa; --bg-sunken:#f4f4f5; --surface:#ffffff;
-  --fg:#18181b; --fg-muted:#52525b; --fg-faint:#a1a1aa;
-  --line:rgba(24,24,27,.08); --line-strong:rgba(24,24,27,.16); --hover:rgba(24,24,27,.045);
-  --accent:#b45309; --accent-soft:rgba(180,83,9,.09); --accent-line:rgba(180,83,9,.32);
-  --play:#0f766e; --play-soft:rgba(15,118,110,.1);
-  --ok:#15803d; --error:#b91c1c;
-  --font-display:Outfit,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-  --font-body:Outfit,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Consolas,monospace;
-  --ease-out:cubic-bezier(.16,1,.3,1);
-  --ease-spring:cubic-bezier(.34,1.4,.44,1);
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#101012; --bg-sunken:#0a0a0b; --surface:#1a1a1d;
-    --fg:#e4e4e7; --fg-muted:#a1a1aa; --fg-faint:#52525b;
-    --line:rgba(228,228,231,.09); --line-strong:rgba(228,228,231,.2); --hover:rgba(228,228,231,.06);
-    --accent:#d97706; --accent-soft:rgba(217,119,6,.13); --accent-line:rgba(217,119,6,.4);
-    --play:#2dd4bf; --play-soft:rgba(45,212,191,.12);
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#101012; --bg-sunken:#0a0a0b; --surface:#1a1a1d;
-  --fg:#e4e4e7; --fg-muted:#a1a1aa; --fg-faint:#52525b;
-  --line:rgba(228,228,231,.09); --line-strong:rgba(228,228,231,.2); --hover:rgba(228,228,231,.06);
-  --accent:#d97706; --accent-soft:rgba(217,119,6,.13); --accent-line:rgba(217,119,6,.4);
-  --play:#2dd4bf; --play-soft:rgba(45,212,191,.12);
-  color-scheme:dark;
-}
-:root[data-theme="light"]{color-scheme:light}
 
-*{box-sizing:border-box}
-body{margin:0;font:15px/1.65 var(--font-body);background:var(--bg);color:var(--fg);
-  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-.num{font-family:var(--font-mono);font-feature-settings:"zero" on}
-a{color:inherit}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-::selection{background:var(--accent-soft)}
+def _play_btn(kind: str, ident: str, label, stamp: str) -> str:
+    label_html = f"<span>{T(label)}</span>" if label else ""
+    return (
+        f'<button type="button" class="om-playbtn" data-play="{esc_attr(kind)}:{esc_attr(ident)}" '
+        f'data-stamp="{esc_attr(disp(stamp))}" title="">'
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" '
+        'aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.29-6.86a1 1 0 0 0 '
+        '0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z"></path></svg>'
+        f'{label_html}<span class="num">{esc(disp(stamp))}</span></button>'
+    )
 
-/* ── 顶栏 ── */
-.topbar{position:sticky;top:0;z-index:20;display:flex;gap:12px;align-items:center;
-  padding:12px 24px;background:color-mix(in srgb,var(--bg) 78%,transparent);
-  backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
-  border-bottom:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
-.brand{margin:0;font-family:var(--font-display);font-size:17px;font-weight:650;
-  letter-spacing:-.02em;white-space:nowrap;flex:none}
-.brand::after{content:"";display:inline-block;width:6px;height:6px;margin-left:9px;
-  border-radius:50%;background:var(--accent);vertical-align:2px;opacity:.85}
-.tb-spacer{flex:1}
-.tb-link{font-size:13px;color:var(--accent);text-decoration:none;
-  border-bottom:1px solid var(--accent-line);white-space:nowrap}
-.tb-link:hover{border-bottom-width:2px}
-.theme-btn{all:unset;cursor:pointer;width:32px;height:32px;display:inline-flex;
-  align-items:center;justify-content:center;border-radius:50%;color:var(--fg-muted);
-  border:1px solid var(--line);font-size:14px}
-.theme-btn:hover{background:var(--hover);color:var(--fg)}
 
-/* ── 页面骨架 ── */
-.page{max-width:880px;margin:0 auto;padding:40px 24px 120px}
-body.has-player .page{padding-bottom:170px}
+def _star(kind: str, ident: str) -> str:
+    return (
+        f'<button type="button" class="om-star" data-star="{esc_attr(kind)}:{esc_attr(ident)}" title="">'
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M12 3.6l2.47 5 5.53.8-4 3.9.94 5.5L12 16.2l-4.94 2.6.94-5.5-4-3.9 '
+        '5.53-.8 2.47-5Z"></path></svg></button>'
+    )
 
-/* ── 刊头 ── */
-.detail-hero{animation:rise-in .5s var(--ease-out) both}
-@keyframes rise-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.dh-kicker{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
-.dh-platform{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--accent)}
-.dh-date{font-family:var(--font-mono);font-size:11.5px;color:var(--fg-faint)}
-.detail-title{margin:0 0 14px;font-family:var(--font-display);
-  font-size:clamp(24px,4.5vw,34px);font-weight:700;letter-spacing:-.03em;line-height:1.18;
-  text-wrap:balance}
-.dh-people{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px}
-.dh-person{display:inline-flex;align-items:center;gap:8px}
-.dh-avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
-  border-radius:50%;background:var(--bg-sunken);border:1px solid var(--line-strong);
-  font-family:var(--font-display);font-size:13px;font-weight:650;color:var(--fg-muted)}
-.dh-pname{font-size:14px;font-weight:600}
-.dh-prole{font-family:var(--font-mono);font-size:10.5px;color:var(--fg-faint)}
-.dh-stats{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;
-  font-size:12.5px;color:var(--fg-muted)}
-.dh-stats b{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--fg);
-  margin-right:2px}
-.dh-link{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-line);
-  font-size:12.5px}
-.dh-link:hover{border-bottom-width:2px}
 
-/* ── 全局按钮 ── */
-button{padding:7px 16px;border:1px solid var(--line-strong);border-radius:10px;
-  background:transparent;color:inherit;font:inherit;font-weight:500;cursor:pointer;
-  transition:background .2s var(--ease-out),border-color .2s var(--ease-out),
-    transform .12s var(--ease-spring)}
-button:hover:not(:disabled){background:var(--hover);
-  border-color:color-mix(in srgb,var(--fg) 28%,transparent)}
-button:active:not(:disabled){transform:translateY(1px) scale(.98)}
+def _chev(kind: str, ident: str, label: str) -> str:
+    return (
+        f'<button type="button" class="av-chev-btn" data-toggle="{esc_attr(kind)}:{esc_attr(ident)}" '
+        f'aria-expanded="false">'
+        '<span class="om-chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" '
+        'stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></span></button>'
+    )
 
-/* ── 观点地图 ── */
-.om{margin-top:8px}
-.om-bar{position:sticky;top:48px;z-index:5;background:var(--bg);
-  padding:12px 0 14px;border-bottom:1px solid var(--line)}
-.om-bar-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.om-seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);
-  border-radius:9px;padding:3px}
-.om-seg button{all:unset;cursor:pointer;padding:4px 14px;border-radius:6px;
-  font-size:14px;color:var(--fg-muted)}
-.om-seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
-.om-edit{all:unset;cursor:pointer;display:inline-flex;gap:7px;align-items:center;
-  padding:4px 13px;border:1px solid var(--accent);color:var(--accent);border-radius:9px;
-  font-size:14px}
-.om-edit:hover{background:var(--accent-soft)}
-.om-hint{font-size:13px;color:var(--fg-muted);margin-left:auto}
 
-.om-layout{display:grid;grid-template-columns:168px 1fr;gap:40px;padding:28px 0 80px}
-.om-layout>main{min-width:0}
-.om-nav{position:sticky;top:100px;align-self:start;display:flex;flex-direction:column;
-  gap:2px;font-size:15px}
-.om-nav a{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:8px;
-  color:var(--fg-muted);text-decoration:none}
-.om-nav a:hover{background:var(--surface);color:var(--fg)}
-.om-nav i{width:9px;height:9px;border-radius:50%;flex:none}
-.om-nav em{margin-left:auto;font-style:normal;font-size:13px;font-variant-numeric:tabular-nums;
-  font-family:var(--font-mono)}
+def claim_row(c: dict, speaker: str, rank=None, arc_id: str = "") -> str:
+    """逐句观点行：与站点的 om-row / av-claim 同一结构。"""
+    cid = c["claim_id"]
+    stamp, end = disp(c.get("timestamp", "")), disp(c.get("end", ""))
+    span = f"{stamp}–{end}" if (stamp and end) else (stamp or end)
+    chips = "".join(
+        f'<button type="button" class="om-relbtn" data-goto="{esc_attr(r.get("target") or "")}" '
+        f'{TA(r.get("note") or "")}>'
+        f'<i style="background:{REL_COLOR.get(r.get("type"), "#868e96")}"></i>'
+        f'{esc(REL_CN.get(r.get("type"), r.get("type") or ""))} '
+        f'<span class="num">{esc(r.get("target") or "")}</span></button>'
+        for r in (c.get("relations") or [])
+    )
+    meta = " · ".join(x for x in (c.get("type"), c.get("confidence"), speaker) if x)
+    meta_html = esc(meta) + (f' · {esc(span)}' if span else "")
+    ev = c.get("evidence")
+    ev_html = (f'<blockquote class="av-open-line"><span class="av-sub">{T(C("evidence"))}</span>{T(ev)}</blockquote>'
+               if ev else "")
+    return (
+        f'<div class="om-row av-claim" id="claim-{esc_attr(cid)}" data-cid="{esc_attr(cid)}"'
+        + (f' data-arc="{esc_attr(arc_id)}"' if arc_id else "")
+        + '>'
+        '<div class="om-row-h" data-toggle="claim:' + esc_attr(cid) + '" role="button" tabindex="0" '
+        'aria-expanded="false">'
+        + (f'<span class="ar-rank num">{rank}</span>' if rank else "")
+        + f'<span class="om-title"><span class="om-cid num">{esc(cid)}</span>'
+        f'{T(c.get("statement", ""))}</span>'
+        + ("" if arc_id else _star("claim", cid))
+        + (_play_btn("claim", cid, "", stamp) if stamp else "")
+        + '<span class="om-chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" '
+        'stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></span>'
+        "</div>"
+        '<div class="om-more">'
+        + (f'<div class="om-rels">{chips}</div>' if chips else "")
+        + f'<div class="om-meta num">{meta_html}</div>{ev_html}'
+        "</div></div>"
+    )
 
-.om-section{margin-bottom:48px;scroll-margin-top:120px}
-.om-section.hide{display:none}
-.om-sh{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
-.om-sh h2{margin:0;font-size:19px;font-weight:700}
-.om-sh small{color:var(--fg-muted);font-size:14px}
-.om-dot{width:11px;height:11px;border-radius:50%;align-self:center;flex:none}
-.om-empty{color:var(--fg-muted);padding:40px 0}
 
-.om-row{border-bottom:1px solid var(--line);animation:rise-in .45s var(--ease-out) both}
-.om-row-pick{animation:none}
-.om-row.hide{display:none}
-.om-row-h{box-sizing:border-box;display:flex;gap:16px;align-items:flex-start;width:100%;
-  padding:15px 0;cursor:pointer}
-.om-row.open>.om-row-h{padding-bottom:10px}
-.om-playbtn{all:unset;cursor:pointer;flex:none;display:inline-flex;align-items:center;
-  justify-content:center;gap:5px;height:28px;min-width:76px;padding:0 10px;border-radius:99px;
-  background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:500;
-  font-variant-numeric:tabular-nums;transition:background .15s,color .15s}
-.om-playbtn .num{font-size:12px}
-.om-playbtn:hover,.om-row.playing .om-playbtn{background:var(--accent);color:#fff}
-.om-title{flex:1;min-width:0;font-size:17px;line-height:1.55;text-wrap:pretty}
-.om-cid{color:var(--fg-faint);font-size:12px;margin-right:8px;font-variant-numeric:tabular-nums}
-.om-star{all:unset;cursor:pointer;flex:none;display:inline-flex;align-items:center;gap:4px;
-  padding:2px 9px;border-radius:99px;font-size:13px;color:var(--fg-muted);
-  border:1px solid var(--line);font-variant-numeric:tabular-nums;line-height:1.5}
-.om-star.on{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:700}
-body.no-chrome .om-star{display:none}
-.om-chev{flex:none;width:14px;height:14px;margin-top:6px;color:var(--fg-muted);
-  transition:transform .2s}
-.om-row.open .om-chev{transform:rotate(90deg)}
-.om-row.playing>.om-row-h{box-shadow:inset 3px 0 0 var(--accent);padding-left:14px}
-.om-row.om-flash>.om-row-h{animation:om-flash 1.6s var(--ease-out)}
-@keyframes om-flash{0%{background:var(--accent-soft)}100%{background:transparent}}
+def _arc_body(a: dict, claims: dict, people: dict) -> str:
+    """展开后的弧内容：开场原话 → beats → 金句 → 其余观点。顺序与站点一致。"""
+    out = ['<div class="av-arc-body">']
+    if a.get("open_line"):
+        out.append(f'<blockquote class="av-open-line"><span class="av-sub">{T(C("open_label"))}</span>'
+                   f'{T(a["open_line"])}</blockquote>')
 
-.om-more{display:none;padding:0 0 20px}
-.om-row.open .om-more{display:block}
-.om-rels{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
-.om-relbtn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
-  padding:2px 10px;border:1px solid var(--line);border-radius:99px;background:var(--surface);
-  font-size:12.5px;color:var(--fg-muted);transition:border-color .15s,color .15s}
-.om-relbtn:hover{border-color:var(--accent);color:var(--accent)}
-.om-relbtn i{width:8px;height:8px;border-radius:50%;flex:none}
-.om-relbtn .num{font-size:11.5px;color:var(--fg-faint)}
-.om-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--fg-muted);margin-bottom:16px}
-.om-ev{font-size:13.5px;line-height:1.7;color:var(--fg-muted);
-  border-left:2px solid var(--line-strong);padding:2px 0 2px 12px;margin:0 0 14px}
-.om-ev b{display:block;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--fg-faint);margin-bottom:2px;font-weight:600}
-.om-note{font-size:13px;color:var(--accent);margin:0}
-.om-note[hidden]{display:none}
-.preason{display:none;width:100%;margin-top:6px;padding:6px 10px;font:inherit;font-size:13px;
-  color:var(--fg);background:var(--surface);border:1px solid var(--accent-line);border-radius:8px}
-body.editing .preason{display:block}
-body.editing .om-note{display:none}
-.om-rank{flex:none;width:34px;font-size:28px;line-height:1;font-weight:700;color:var(--accent);
-  padding-top:2px}
+    beats = a.get("beats") or []
+    if beats:
+        out.append(f'<div class="av-beats"><div class="av-sub">{T(C("beats_label"))}</div>')
+        for b in beats:
+            out.append(f'<div class="av-beat"><span class="av-beat-at num">{esc(disp(b.get("at")))}</span>'
+                       f'<span class="av-beat-gist">{T(b.get("gist", ""))}</span></div>')
+        out.append("</div>")
 
-.om-seg button:focus-visible,.om-edit:focus-visible,.om-playbtn:focus-visible,
-.om-star:focus-visible,.om-relbtn:focus-visible,.om-row-h:focus-visible{
-  outline:2px solid var(--accent);outline-offset:2px}
+    points = [p.get("claim_id") for p in (a.get("points") or []) if p.get("claim_id") in claims]
+    evidence = [cid for cid in (a.get("evidence") or []) if cid in claims]
+    rest = [cid for cid in evidence if cid not in set(points)]
 
-/* ── 播放条 ── */
-.playerbar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);
-  width:min(680px,calc(100vw - 28px));z-index:40;display:none;align-items:center;gap:14px;
-  padding:12px 18px;background:color-mix(in srgb,var(--surface) 88%,transparent);
-  backdrop-filter:blur(16px) saturate(1.5);-webkit-backdrop-filter:blur(16px) saturate(1.5);
-  border:1px solid var(--line-strong);border-radius:18px;
-  box-shadow:0 24px 48px -16px rgba(24,24,27,.35),inset 0 1px 0 rgba(255,255,255,.08)}
-.playerbar.show{display:flex;animation:player-in .45s var(--ease-spring) both}
-@keyframes player-in{from{opacity:0;transform:translateX(-50%) translateY(24px)}
-  to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.pb-toggle{flex:0 0 auto;width:42px;height:42px;display:inline-flex;align-items:center;
-  justify-content:center;border-radius:50%;border:1px solid var(--line-strong);
-  background:var(--fg);color:var(--bg);cursor:pointer;padding:0;transition:transform .15s var(--ease-spring)}
-.pb-toggle:hover:not(:disabled){background:var(--fg);border-color:var(--fg)}
-.pb-toggle:active{transform:scale(.9)}
-.pb-info{flex:1;min-width:0}
-.pb-stmt{font-family:var(--font-display);font-size:13px;font-weight:600;letter-spacing:-.01em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
-.pb-track{height:5px;border-radius:3px;background:var(--bg-sunken);cursor:pointer;
-  position:relative;overflow:hidden}
-.pb-clip{position:absolute;top:0;height:100%;background:color-mix(in srgb,var(--accent) 30%,transparent);
-  pointer-events:none;display:none}
-.pb-fill{height:100%;border-radius:3px;background:var(--play);transition:width .2s linear}
-.pb-time{font-family:var(--font-mono);font-size:10.5px;color:var(--fg-faint);margin-top:5px}
+    if points:
+        out.append(f'<div class="av-points"><div class="av-sub">{T(C("points_label", n=len(points)))}</div>')
+        for i, cid in enumerate(points, 1):
+            c = claims[cid]
+            out.append(claim_row(c, _name(people, c.get("speaker")), rank=i, arc_id=a["arc_id"]))
+        out.append("</div>")
+    if rest:
+        out.append(f'<div class="av-points"><div class="av-sub">{T(C("rest_label", n=len(rest)))}</div>')
+        for cid in rest:
+            c = claims[cid]
+            out.append(claim_row(c, _name(people, c.get("speaker")), arc_id=a["arc_id"]))
+        out.append("</div>")
+    out.append("</div>")
+    return "".join(out)
 
-/* ── 导出面板 ── */
-#exportpanel{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;
-  width:min(680px,calc(100vw - 28px));z-index:45;display:none;
-  background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;
-  padding:14px 16px;box-shadow:0 24px 48px -16px rgba(24,24,27,.35)}
-#exportpanel.show{display:block}
-.ep-hd{display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--fg-muted);
-  margin-bottom:8px}
-.ep-hd b{color:var(--accent)}
-#exptext{width:100%;height:110px;resize:vertical;font-family:var(--font-mono);font-size:11.5px;
-  color:var(--fg);background:var(--bg-sunken);border:1px solid var(--line);border-radius:10px;
-  padding:8px 10px}
-.ep-btns{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-.ep-btns button{font-size:12.5px;padding:5px 13px}
-.ep-btns .primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.ep-btns .primary:hover{background:var(--accent);filter:brightness(1.06);color:#fff}
 
-/* ── 导流条（redirect 模式） ── */
-#origbar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--surface);
-  border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));
-  font-size:13px;box-shadow:0 -8px 24px -12px rgba(0,0,0,.25)}
-body.redirect .page{padding-bottom:130px}
-.orig-link{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--fg)}
-.orig-ico{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
-.orig-txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.orig-go{color:var(--accent);font-weight:600;flex:none}
-.orig-hint{margin-top:7px;color:var(--fg-faint);font-size:12px;line-height:1.55;transition:color .2s}
-.orig-hint.flash{color:var(--accent);font-weight:500}
+def _name(people: dict, pid) -> str:
+    return (people.get(pid) or {}).get("name") or (pid or "")
 
-#toast{position:fixed;left:50%;top:68px;transform:translateX(-50%);z-index:60;
-  background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:10px;font-size:12.5px;
-  opacity:0;transition:.25s;pointer-events:none}
-#toast.show{opacity:1}
 
-/* ── 响应式 ── */
-@media (max-width:760px){
-  .topbar{padding:11px 16px}
-  .page{padding:26px 16px 96px}
-  .om-layout{display:block;padding-top:8px}
-  .om-bar{top:44px;padding:10px 0 12px}
-  .om-bar-row{justify-content:flex-start}
-  .om-hint{margin-left:0;flex-basis:100%;font-size:12px;order:3}
-  .om-seg button{padding:4px 12px;font-size:13px}
-  .om-edit{padding:4px 10px;font-size:13px}
-  .om-nav{position:sticky;top:90px;z-index:4;flex-direction:row;flex-wrap:wrap;gap:5px;
-    padding:8px 2px;margin:0 0 10px;background:var(--bg);border-bottom:1px solid var(--line)}
-  .om-nav a{white-space:nowrap;border:1px solid var(--line);padding:3px 10px;border-radius:99px;
-    background:var(--surface);flex:none;font-size:12.5px}
-  .om-nav em{display:none}
-  .om-rank{width:22px;font-size:18px}
-  .om-section{margin-bottom:32px;scroll-margin-top:190px}
-  .om-sh h2{font-size:17px}
-  .om-sh small{font-size:12.5px}
-  .om-title{font-size:15.5px;flex-basis:calc(100% - 100px)}
-  .om-row-h{flex-wrap:wrap;gap:6px 12px}
-  .om-star{padding:4px 10px}
-  .om-chev{margin-top:4px}
-  .om-relbtn{font-size:12px;padding:2px 8px}
-  .detail-title{font-size:clamp(22px,6vw,28px)}
-  .playerbar{left:0;right:0;bottom:0;transform:none;width:100%;border-radius:0;
-    border-left:0;border-right:0;border-bottom:0;
-    padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));gap:10px}
-  #exportpanel{bottom:0;width:100%;border-radius:16px 16px 0 0}
-}
-@media (max-width:420px){
-  .om-title{font-size:15px}
-  .om-cid{font-size:10.5px}
-}
-@media (pointer:coarse){
-  *{-webkit-tap-highlight-color:transparent}
-  .om-relbtn:active,.om-playbtn:active{opacity:.7}
-}
-@media (prefers-reduced-motion:reduce){
-  .om *,.playerbar{transition:none!important;animation:none!important}
-}
-"""
+def arc_card(a: dict, claims: dict, people: dict) -> str:
+    dur = a.get("duration_sec") or 0
+    mins = TX(C("minutes", n=round(dur / 60))) if dur else ""
+    n_ev = len([c for c in (a.get("evidence") or []) if c in claims])
+    meta = " · ".join(x for x in (mins, TX(C("n_evidence", n=n_ev)) if n_ev else "") if x)
+    auto = (a.get("title_source") == "auto")
+    return (
+        f'<article class="av-arc" id="arc-{esc_attr(a["arc_id"])}" data-arc="{esc_attr(a["arc_id"])}">'
+        '<div class="av-arc-h" data-toggle="arc:' + esc_attr(a["arc_id"]) + '" role="button" '
+        'tabindex="0" aria-expanded="false">'
+        '<div class="av-arc-top"><span class="av-arc-id num">' + esc(a["arc_id"]) + "</span>"
+        f'<h3 class="av-arc-title">{T(a.get("title", ""))}'
+        + (f'<span class="av-auto" {TA(C("auto_title"))}>auto</span>' if auto else "")
+        + "</h3></div>"
+        + (f'<p class="av-arc-sum">{T(a["summary"])}</p>' if a.get("summary") else "")
+        + '<div class="av-arc-actions">'
+        + _play_btn("arc", a["arc_id"], C("listen"), a.get("start", ""))
+        + (f'<span class="av-arc-meta num">{esc(meta)}</span>' if meta else "")
+        + _star("arc", a["arc_id"])
+        + _chev("arc", a["arc_id"], "")
+        + "</div></div>"
+        + _arc_body(a, claims, people)
+        + "</article>"
+    )
+
+
+def _nav_items(items: list[tuple[str, str, int, str]]) -> tuple[str, str, str]:
+    """返回 (strip 里的 a 标签, 更多按钮, sheet 内容)。"""
+    links = "".join(
+        f'<a href="#{esc_attr(sid)}"><i style="background:{color}"></i>{esc(name)}'
+        f'<em class="num">{n}</em></a>'
+        for sid, name, n, color in items
+    )
+    more = (
+        '<button type="button" class="om-nav-more" id="navmore" aria-expanded="false" '
+        f'aria-controls="navsheet">{T(C("nav"))} <span class="num">{len(items)}</span>'
+        '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">'
+        '<path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6"></path></svg>'
+        "</button>"
+    )
+    sheet = (
+        '<div class="om-nav-sheet" id="navsheet" hidden><div class="om-nav-sheet-h">'
+        f'<span>{T(C("nav_count", n=len(items)))}</span>'
+        f'<button type="button" class="om-nav-sheet-x" id="navsheetx" {TA(C("close"), "aria-label")}>✕</button>'
+        f"</div>{links}</div>"
+    )
+    return links, more, sheet
+
 
 JS = r"""
-const REL_CN=__REL_CN__, REL_COLORS=__COLORS__;
-const SEGS=__SEGS__, FULL_URL=__AUDIO__, FULL_DUR=__FULL_DUR__, ORIG_URL=__ORIG_URL__;
-const REDIRECT=__REDIRECT__, CLAIMS=__CLAIMS__, CONTENT_ID=__CONTENT_ID__;
-const SERIES=__SERIES__, EPNO=__EPNO__, PLATFORM=__PLATFORM__;
-let picks=__PICKS__.slice();
-let editing=false;
-
-/* ---------- 基础 ---------- */
-function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-  .replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function toSec(t){const p=String(t||'').match(/\d+/g)||[];const q=p.map(Number);
-  return q.length===3?q[0]*3600+q[1]*60+q[2]:(q.length===2?q[0]*60+q[1]:(q[0]||0))}
-function fmt(x){x=Math.max(0,Math.floor(x||0));const h=Math.floor(x/3600),m=Math.floor(x%3600/60),
-  s=x%60;return h?h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')
-  :m+':'+String(s).padStart(2,'0')}
-function toast(msg){const t=document.getElementById('toast');if(!t)return;
-  t.textContent=msg;t.classList.add('show');clearTimeout(t._tm);
-  t._tm=setTimeout(()=>t.classList.remove('show'),2000)}
-
-/* ---------- 主题 ---------- */
-try{const th=localStorage.getItem('heron-theme');
-  if(th==='light'||th==='dark')document.documentElement.dataset.theme=th}catch(e){}
-function toggleTheme(){
-  const root=document.documentElement;
-  const cur=root.dataset.theme;
-  const sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-  const next=cur?(cur==='dark'?'light':'dark'):(sys==='dark'?'light':'dark');
-  root.dataset.theme=next;
-  try{localStorage.setItem('heron-theme',next)}catch(e){}
-  const b=document.getElementById('themebtn');if(b)b.textContent=next==='dark'?'☾':'☀';
+const D = __DATA__;
+const I18N = __I18N__;
+const LANGS = __LANGS__;
+const DEFAULT_LANG = __DEFAULT_LANG__;
+const DOC_TITLES = __DOC_TITLES__;
+const REDIRECT = __REDIRECT__;
+let LANG = DEFAULT_LANG;
+function t(key, vars) {
+  const table = I18N[LANG] || I18N[DEFAULT_LANG] || {};
+  let s = table[key];
+  if (s === undefined) s = (I18N[DEFAULT_LANG] || {})[key];
+  if (s === undefined) return key;
+  if (vars) Object.keys(vars).forEach(k => { s = s.split('{' + k + '}').join(vars[k]); });
+  return s;
 }
-(function(){
-  const b=document.getElementById('themebtn');if(!b)return;
-  const cur=document.documentElement.dataset.theme;
-  const dark=cur?cur==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
-  b.textContent=dark?'☾':'☀';
-})();
+function pick(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v))
+    return v[LANG] || v[DEFAULT_LANG] || Object.values(v)[0] || '';
+  return v == null ? '' : String(v);
+}
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const fmt = (x) => { x = Math.max(0, Math.floor(x || 0)); const h = Math.floor(x / 3600),
+  m = Math.floor(x % 3600 / 60), s = x % 60;
+  return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+           : m + ':' + String(s).padStart(2, '0'); };
+const STORE = 'heron-picks:' + D.content_id;
 
-/* ---------- 行展开 ---------- */
-function toggleRow(head){
-  const row=head.closest('.om-row');if(!row)return;
-  const open=!row.classList.contains('open');
-  row.classList.toggle('open',open);
-  head.setAttribute('aria-expanded',open?'true':'false');
-}
-function rowKey(ev,head){
-  if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();toggleRow(head)}
-}
-function gotoClaim(cid){
-  const el=document.getElementById('claim-'+cid);if(!el)return;
-  el.classList.add('open');
-  const head=el.querySelector('.om-row-h');if(head)head.setAttribute('aria-expanded','true');
-  const sticky=['topbar','om-bar'].map(c=>document.querySelector('.'+c))
-    .filter(Boolean).map(x=>x.getBoundingClientRect().bottom);
-  const top=el.getBoundingClientRect().top+window.scrollY-Math.max(0,...sticky)-8;
-  window.scrollTo({top,behavior:'smooth'});
-  el.classList.remove('om-flash');void el.offsetWidth;el.classList.add('om-flash');
-  setTimeout(()=>el.classList.remove('om-flash'),1700);
+/* ---------- 语言切换（单页双语，DOM 与 id 不变） ---------- */
+function applyLang(lang, save) {
+  LANG = LANGS.indexOf(lang) >= 0 ? lang : DEFAULT_LANG;
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG;
+  document.documentElement.dataset.lang = LANG;
+  $$('[data-' + LANG + ']').forEach(el => {
+    el.textContent = el.getAttribute('data-' + LANG);
+  });
+  $$('[data-title-' + LANG + ']').forEach(el => {
+    el.title = el.getAttribute('data-title-' + LANG);
+  });
+  $$('[data-aria-label-' + LANG + ']').forEach(el => {
+    el.setAttribute('aria-label', el.getAttribute('data-aria-label-' + LANG));
+  });
+  $$('.langsw button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === LANG)));
+  $$('[data-play]').forEach(b => {
+    if (b.dataset.stamp) b.title = t('play_title', { t: b.dataset.stamp });
+  });
+  $$('.av-chev-btn').forEach(b => {
+    b.setAttribute('aria-label', t(b.getAttribute('aria-expanded') === 'true' ? 'collapse' : 'expand'));
+  });
+  if (DOC_TITLES[LANG]) document.title = DOC_TITLES[LANG];
+  if (cur) $('#pb-stmt').textContent = pick(cur.statement);
+  if (save !== false) { try { localStorage.setItem('heron-lang', LANG); } catch (e) {} }
+  paintTheme();
+  if (typeof paintPicks === 'function') paintPicks();
 }
 
-/* ---------- 推荐 ---------- */
-function pickOf(cid){return picks.find(p=>p.claim_id===cid)}
-function pickRow(p,i){
-  const c=CLAIMS[p.claim_id]||{};
-  const t=p.timestamp||c.timestamp||'',e=p.end||c.end||'';
-  const chips=(c.rels||[]).map(r=>'<button type="button" class="om-relbtn" '
-    +'onclick="event.stopPropagation();gotoClaim(\''+r.target+'\')">'
-    +'<i style="background:'+(REL_COLORS[r.type]||'#868e96')+'"></i>'
-    +(REL_CN[r.type]||r.type)+' <span class="num">'+escHtml(r.target)+'</span></button>').join('');
-  const meta=[c.type,c.confidence,c.speakerName].filter(Boolean).map(escHtml).join(' · ')
-    +((t)?((c.type||c.confidence||c.speakerName?' · ':'')+'<span class="num">'
-      +escHtml(t)+'–'+escHtml(e)+'</span>'):'');
-  const ev=c.evidence?('<div class="om-ev"><b>语料</b>'+escHtml(c.evidence)+'</div>'):'';
-  return '<div class="om-row om-row-pick" data-cid="'+escHtml(p.claim_id)+'">'
-    +'<div class="om-row-h" role="button" tabindex="0" aria-expanded="false" '
-    +'onclick="toggleRow(this)" onkeydown="rowKey(event,this)">'
-    +'<span class="om-rank num">'+(i+1)+'</span>'
-    +'<span class="om-title"><span class="om-cid num">'+escHtml(p.claim_id)+'</span>'
-    +escHtml(p.label||c.statement||p.claim_id)+'</span>'
-    +'<button type="button" class="om-star on" title="移出推荐" '
-    +'onclick="togglePick(event,\''+p.claim_id+'\')">★</button>'
-    +'<button type="button" class="om-playbtn" '
-    +'onclick="playClaim(event,\''+p.claim_id+'\',\''+escHtml(t)+'\',\''+escHtml(e)+'\')">'
-    +'<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">'
-    +'<path d="M3 1.6v8.8l7-4.4z" fill="currentColor"/></svg>'
-    +'<span class="num">'+escHtml(t)+'</span></button>'
-    +'<span class="om-chev"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">'
-    +'<path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" '
-    +'stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>'
-    +'<div class="om-more">'+(chips?'<div class="om-rels">'+chips+'</div>':'')
-    +'<div class="om-meta num">'+meta+'</div>'+ev
-    +'<div class="om-note"'+(p.note?'':' hidden')+'>'+(p.note?'推荐理由：'+escHtml(p.note):'')+'</div>'
-    +'<input class="preason" placeholder="写推荐理由（可选）" value="'+escHtml(p.note||'')+'" '
-    +'onclick="event.stopPropagation()" oninput="setReason('+i+',this.value)"></div></div>';
+/* ---------- 主题（与站点同 key，切过去也认得） ---------- */
+function paintTheme() {
+  const cur = document.documentElement.dataset.theme;
+  const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const b = $('#themebtn');
+  if (b) b.title = dark ? t('theme_light') : t('theme_dark');
+  if (b) b.dataset.dark = dark ? '1' : '';
 }
-function buildJson(){
-  return JSON.stringify({content_id:CONTENT_ID,picks:picks.map(p=>({
-    claim_id:p.claim_id,label:p.label||'',note:p.note||'',
-    timestamp:p.timestamp||'',end:p.end||''}))},null,2);
+function toggleTheme() {
+  const root = document.documentElement, cur = root.dataset.theme;
+  const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('heron-theme', root.dataset.theme); } catch (e) {}
+  paintTheme();
 }
-function renderPicks(){
-  const list=document.getElementById('pickslist');
-  if(list)list.innerHTML=picks.map(pickRow).join('');
-  const sec=document.getElementById('s-top');
-  if(sec)sec.classList.toggle('hide',picks.length===0);
-  const nav=document.getElementById('nav-top');
-  if(nav){nav.style.display=picks.length?'':'none';
-    const em=nav.querySelector('em');if(em)em.textContent=picks.length}
-  const cnt=document.getElementById('pickscount');
-  if(cnt)cnt.textContent=picks.length+' 条 · 点击直接播放';
-  const mc=document.getElementById('minecount');
-  if(mc)mc.textContent=picks.length;
-  document.querySelectorAll('.om-row[data-cid]').forEach(r=>{
-    r.classList.toggle('is-pick',!!pickOf(r.dataset.cid));
-    if(!r.classList.contains('om-row-pick')){
-      const s=r.querySelector('.om-star');
-      const on=!!pickOf(r.dataset.cid);
-      if(s){s.classList.toggle('on',on);s.textContent=on?'★':'☆'}
+
+/* ---------- 推荐（本地存储；站点那边是账号，这里是同一套按钮） ---------- */
+let picks = [];
+try { picks = JSON.parse(localStorage.getItem(STORE) || '[]') || []; } catch (e) { picks = []; }
+function hasPick(kind, id) { return picks.some(p => p.kind === kind && p.id === id); }
+function togglePick(kind, id) {
+  const i = picks.findIndex(p => p.kind === kind && p.id === id);
+  if (i >= 0) picks.splice(i, 1);
+  else picks.push({ kind: kind, id: id, at: new Date().toISOString() });
+  try { localStorage.setItem(STORE, JSON.stringify(picks)); } catch (e) {}
+  paintPicks();
+}
+function unitStar(el) {
+  /* 弧级 / 逐句行级各有一颗星；弧内的证据行不参与筛选。 */
+  const b = el.matches('.av-arc') ? $('.av-arc-actions [data-star]', el)
+                                  : $('.om-row-h [data-star]', el);
+  return b ? b.dataset.star.split(':') : null;
+}
+function paintPicks() {
+  const mine = document.body.classList.contains('mine-mode');
+  $$('[data-star]').forEach(b => {
+    const [k, id] = b.dataset.star.split(':');
+    const on = hasPick(k, id);
+    b.classList.toggle('on', on);
+    b.title = on ? t('star_on') : (k === 'arc' ? t('star_arc') : t('star_claim'));
+  });
+  const mc = $('#minecount'); if (mc) mc.textContent = picks.length;
+  ['#sharebtn', '#exportbtn'].forEach(sel => { const b = $(sel); if (b) b.hidden = picks.length === 0; });
+  let total = 0;
+  $$('.om-section').forEach(sec => {
+    let visible = 0;
+    $$('.av-arc, .om-row[data-cid]', sec).forEach(el => {
+      if (el.parentElement.closest('.om-row')) return;   // 弧内的证据行
+      const key = unitStar(el);
+      const keep = !mine || (key ? hasPick(key[0], key[1]) : false);
+      el.hidden = !keep;
+      if (keep) visible++;
+    });
+    sec.hidden = visible === 0;
+    total += visible;
+    const small = $('.om-sh small', sec);
+    if (small) {
+      const unit = small.dataset.unit === 'arc' ? 'n_segments' : 'n_claims';
+      small.textContent = t(unit, { n: mine ? visible : (+small.dataset.count || 0) });
     }
   });
-  const ta=document.getElementById('exptext');
-  if(ta)ta.value=buildJson();
-  applyFilter();
+  const hint = $('#omhint');
+  if (hint) hint.textContent = mine
+    ? t('mine_hint', { n: picks.length }) + (total === 0 ? t('mine_empty') : '')
+    : (hint.getAttribute('data-' + LANG) || '');
 }
-function togglePick(ev,cid){
-  if(ev)ev.stopPropagation();
-  if(!editing){toast('先点「✎ 编辑推荐」再加入推荐');return}
-  const i=picks.findIndex(p=>p.claim_id===cid);
-  if(i>=0){picks.splice(i,1)}
-  else{
-    const c=CLAIMS[cid]||{};
-    picks.push({claim_id:cid,label:c.statement||cid,note:'',
-      timestamp:c.timestamp||'',end:c.end||''});
-  }
-  renderPicks();
+function setMine(mine) {
+  document.body.classList.toggle('mine-mode', mine);
+  $$('.om-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mine === String(mine))));
+  paintPicks();
 }
-function setReason(i,v){
-  if(!picks[i])return;
-  picks[i].note=v;
-  const ta=document.getElementById('exptext');
-  if(ta)ta.value=buildJson();
+function shareView() {
+  const url = location.href.split('#')[0] + '#picks=' + picks.map(p => p.id).join(',');
+  const done = () => toast(t('share_done'));
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(url).then(done).catch(() => { location.hash = 'picks=' + picks.map(p => p.id).join(','); done(); });
+  else { location.hash = 'picks=' + picks.map(p => p.id).join(','); done(); }
 }
-function toggleEdit(){
-  editing=!editing;
-  document.body.classList.toggle('editing',editing);
-  const b=document.getElementById('editbtn');
-  if(b)b.textContent=editing?'✓ 完成编辑':'✎ 编辑推荐';
-  const p=document.getElementById('exportpanel');
-  if(p)p.classList.toggle('show',editing);
-  if(editing){toast('点 ☆ 加入推荐；填推荐理由后复制 JSON')}
-}
-function copyExport(){
-  const ta=document.getElementById('exptext'),txt=buildJson();
-  if(ta){ta.value=txt;ta.focus();ta.select()}
-  const ok=()=>toast('已复制 '+picks.length+' 条推荐');
-  const fail=()=>toast('已全选，请按 Ctrl/⌘+C 手动复制');
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(ok).catch(fail);
-  }else{
-    let done=false;try{done=document.execCommand('copy')}catch(e){}
-    done?ok():fail();
-  }
-}
-function downloadExport(){
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([buildJson()],{type:'application/json'}));
-  a.download='picks_'+CONTENT_ID+'.json';a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
-}
-/* 把当前推荐写进页面，另存一份可独立打开的 HTML */
-function buildPageHtml(){
-  const doc=document.documentElement.cloneNode(true);
-  doc.removeAttribute('data-theme');
-  doc.querySelectorAll('.om-row.open').forEach(r=>r.classList.remove('open'));
-  doc.querySelectorAll('.om-row-h').forEach(h=>h.setAttribute('aria-expanded','false'));
-  doc.querySelectorAll('.om-row.playing,.om-row.om-flash').forEach(r=>
-    r.classList.remove('playing','om-flash'));
-  const pb=doc.querySelector('#playerbar');if(pb)pb.classList.remove('show');
-  doc.querySelectorAll('#pb-fill').forEach(e=>e.style.width='0');
-  const clip=doc.querySelector('#pb-clip');
-  if(clip){clip.style.display='none';clip.style.left='';clip.style.width=''}
-  const stmt=doc.querySelector('#pb-stmt');
-  if(stmt)stmt.textContent='点上方任一观点的时间戳开始';
-  const ptime=doc.querySelector('#pb-time');if(ptime)ptime.textContent='0:00';
-  const ptg=doc.querySelector('#pb-toggle');if(ptg)ptg.textContent='▶';
-  const body=doc.querySelector('body');
-  if(body)body.classList.remove('has-player','editing','mine-mode');
-  const panel=doc.querySelector('#exportpanel');if(panel)panel.classList.remove('show');
-  const editBtn=doc.querySelector('#editbtn');if(editBtn)editBtn.textContent='✎ 编辑推荐';
-  const ta=doc.querySelector('#exptext');if(ta)ta.textContent='';
-  const pickList=doc.querySelector('#pickslist');if(pickList)pickList.innerHTML='';
-  doc.querySelectorAll('.om-seg button').forEach(b=>
-    b.setAttribute('aria-pressed',String(b.dataset.mine==='false')));
-  doc.querySelectorAll('.om-section.hide').forEach(s=>s.classList.remove('hide'));
-  const toastEl=doc.querySelector('#toast');
-  if(toastEl){toastEl.textContent='';toastEl.classList.remove('show')}
-  const target=[...doc.querySelectorAll('script')].find(s=>
-    s.textContent.indexOf('let picks=')>=0);
-  if(target){
-    const txt=target.textContent;
-    const a=txt.indexOf('let picks='),b=txt.indexOf('.slice();',a);
-    if(a>=0&&b>a){
-      const arr=JSON.stringify(picks).replace(/<\//g,'<\\/');
-      target.textContent=txt.slice(0,a)+'let picks='+arr+'.slice();'
-        +txt.slice(b+'.slice();'.length);
-    }
-  }
-  return '<!DOCTYPE html>\n'+doc.outerHTML;
-}
-function exportPage(){
-  const html=buildPageHtml();
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
-  a.download=(CONTENT_ID||'card')+'_picks.html';a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-  toast('已生成 '+a.download+'：推荐已写进页面');
+function exportPicks() {
+  const rows = picks.map(p => {
+    const a = D.arcs[p.id];
+    return p.kind === 'arc' ? { arc_id: p.id, title: a ? pick(a.title) : '' } : { claim_id: p.id };
+  });
+  const body = JSON.stringify({ content_id: D.content_id, picks: rows }, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type: 'application/json' }));
+  a.download = 'picks_' + D.content_id + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(t('export_done', { id: D.content_id }));
 }
 
-/* ---------- 筛选：全部 / 我的推荐 ---------- */
-function setFilter(mine){
-  document.body.classList.toggle('mine-mode',mine);
-  document.querySelectorAll('.om-seg button').forEach(b=>
-    b.setAttribute('aria-pressed',String(b.dataset.mine===String(mine))));
-  applyFilter();
+/* ---------- 展开 / 折叠 ---------- */
+function toggleBox(el, open) {
+  const [kind, id] = el.dataset.toggle.split(':');
+  const host = el.closest('.av-arc, .om-row');
+  const state = open === undefined ? !host.classList.contains('open') : open;
+  host.classList.toggle('open', state);
+  el.setAttribute('aria-expanded', String(state));
+  const chev = $('.om-chev', el); if (chev) chev.classList.toggle('open', state);
+  if (el.classList.contains('av-chev-btn')) el.setAttribute('aria-label', t(state ? 'collapse' : 'expand'));
 }
-function applyFilter(){
-  const mine=document.body.classList.contains('mine-mode');
-  document.querySelectorAll('.om-section').forEach(sec=>{
-    if(sec.id==='s-top'){sec.classList.toggle('hide',mine||picks.length===0);return}
-    const rows=[...sec.querySelectorAll('.om-row')];
-    const visible=rows.filter(r=>!mine||r.classList.contains('is-pick'));
-    sec.classList.toggle('hide',visible.length===0);
-    const small=sec.querySelector('.om-sh small');
-    if(small)small.textContent=visible.length+' 条';
-  });
+function flash(el) {
+  if (!el) return;
+  el.classList.remove('om-flash'); void el.offsetWidth; el.classList.add('om-flash');
+  setTimeout(() => el.classList.remove('om-flash'), 1700);
+}
+function scrollTo(el) {
+  if (!el) return;
+  const bars = ['.topbar', '.om-bar'].map(s => $(s)).filter(Boolean)
+    .map(x => x.getBoundingClientRect().bottom);
+  const top = el.getBoundingClientRect().top + window.scrollY - Math.max(0, ...bars) - 12;
+  window.scrollTo({ top: top, behavior: 'smooth' });
+}
+function gotoClaim(cid) {
+  const el = $('#claim-' + cid); if (!el) return;
+  const arc = el.closest('.av-arc');
+  if (arc && !arc.classList.contains('open')) {
+    const head = $('.av-arc-h', arc); if (head) toggleBox(head, true);
+  }
+  const head = $('.om-row-h', el); if (head) toggleBox(head, true);
+  scrollTo(el); flash(el);
 }
 
 /* ---------- 音频 ---------- */
-const au=document.getElementById('au');
-const pb=document.getElementById('playerbar');
-const pbStmt=document.getElementById('pb-stmt');
-const pbFill=document.getElementById('pb-fill');
-const pbClip=document.getElementById('pb-clip');
-const pbTime=document.getElementById('pb-time');
-const pbToggle=document.getElementById('pb-toggle');
-const pbTrack=document.getElementById('pb-track');
-let blobURLs={},curCid=null,curEnd=null,pendingSeek=null;
-
-function segSrc(cid){
-  if(blobURLs[cid])return blobURLs[cid];
-  const s=SEGS[cid];if(!s||!s.b64)return null;
-  try{
-    const bin=atob(s.b64),n=bin.length,buf=new Uint8Array(n);
-    for(let i=0;i<n;i++)buf[i]=bin.charCodeAt(i);
-    blobURLs[cid]=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
-    return blobURLs[cid];
-  }catch(e){return null}
+const au = $('#au');
+const bar = $('#playerbar');
+let cur = null, blobCache = {};
+function segSrc(cid) {
+  if (blobCache[cid]) return blobCache[cid];
+  const s = D.segs[cid]; if (!s || !s.b64) return null;
+  try {
+    const bin = atob(s.b64), n = bin.length, buf = new Uint8Array(n);
+    for (let i = 0; i < n; i++) buf[i] = bin.charCodeAt(i);
+    blobCache[cid] = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+    return blobCache[cid];
+  } catch (e) { return null; }
 }
-function markPlaying(cid){
-  document.querySelectorAll('.om-row.playing').forEach(r=>r.classList.remove('playing'));
-  if(!cid)return;
-  document.querySelectorAll('.om-row[data-cid="'+cid+'"]').forEach(r=>r.classList.add('playing'));
+function play(kind, id) {
+  const item = (kind === 'arc' ? D.arcs[id] : D.claims[id]) || {};
+  const start = __TO_SEC__(item.start || item.timestamp || '0:00');
+  const end = __TO_SEC__(item.end || '') || 0;
+  const rawStatement = kind === 'arc' ? (item.title || id) : (item.statement || id);
+  const statement = pick(rawStatement);
+  if (REDIRECT || !au) { locate(kind, id, item); return; }
+  $$('.av-arc.playing, .om-row.playing').forEach(x => x.classList.remove('playing'));
+  const host = (kind === 'arc' ? $('#arc-' + id) : $('#claim-' + id));
+  if (host) host.classList.add('playing');
+  cur = { kind: kind, id: id, start: start, end: end > start ? end : 0, statement: rawStatement };
+  bar.hidden = false; document.body.classList.add('has-player');
+  $('#pb-stmt').textContent = statement;
+  const seg = kind === 'claim' ? segSrc(id) : null;
+  const src = seg || D.audio;
+  if (!src) { toast(t('no_audio')); bar.hidden = true; return; }
+  if (au.getAttribute('src') !== src) {
+    au.src = src;
+    au.addEventListener('loadedmetadata', () => {
+      try { au.currentTime = seg ? 0 : start; } catch (e) {}
+      const p = au.play(); if (p && p.catch) p.catch(() => toast(t('autoplay')));
+    }, { once: true });
+    au.load();
+  } else {
+    try { au.currentTime = seg ? 0 : start; } catch (e) {}
+    const p = au.play(); if (p && p.catch) p.catch(() => toast(t('autoplay')));
+  }
+  sync();
 }
-function locate(t){
-  const mins=Math.round(toSec(t)/60);
-  const txt=(PLATFORM||'原平台')+(SERIES?'《'+SERIES+'》':'')+(EPNO?' EP.'+EPNO:'')
-    +' 约第 '+mins+' 分钟（'+t+'）';
-  const hint=document.getElementById('orig-hint');
-  const show=(ok)=>{
-    if(!hint)return;
-    hint.innerHTML=(ok?'✅ 已复制：':'📍 ')+escHtml(txt)
-      +'　<a href="'+escHtml(ORIG_URL)+'" target="_blank" rel="noopener" '
-      +'style="color:var(--accent)">打开原节目 →</a>';
-    hint.classList.add('flash');
-    clearTimeout(hint._tm);hint._tm=setTimeout(()=>hint.classList.remove('flash'),2400);
-  };
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(()=>show(true)).catch(()=>show(false));
-  }else{show(false)}
+function locate(kind, id, item) {
+  const mins = Math.round(__TO_SEC__(item.timestamp || item.start || '0:00') / 60);
+  const txt = (D.platform || '原平台') + (D.series ? '《' + D.series + '》' : '')
+    + ' 约第 ' + mins + ' 分钟（' + (item.timestamp || item.start || '') + '）';
+  const say = () => toast(t('locate', { where: txt }));
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(say).catch(say);
+  else say();
 }
-function playClaim(ev,cid,t,e){
-  if(ev)ev.stopPropagation();
-  if(REDIRECT){locate(t);return}
-  if(!au)return;
-  markPlaying(cid);curCid=cid;
-  const c=CLAIMS[cid]||{};
-  if(pbStmt)pbStmt.textContent=cid+' · '+(c.statement||'');
-  if(pb&&!pb.classList.contains('show')){
-    pb.classList.add('show');document.body.classList.add('has-player');
-  }
-  const seg=segSrc(cid);
-  if(seg){
-    curEnd=null;au.src=seg;
-    if(pbClip)pbClip.style.display='none';
-    const p=au.play();
-    if(p&&p.catch)p.catch(()=>toast('播放被浏览器拦截，点播放条 ▶ 重试'));
-    return;
-  }
-  if(!FULL_URL){
-    if(pb)pb.classList.remove('show');
-    document.body.classList.remove('has-player');
-    toast('这条观点没有可播放音频，请到原平台收听');
-    return;
-  }
-  const start=toSec(t),end=e?toSec(e):0;
-  curEnd=end>start?end:null;
-  if(pbClip&&FULL_DUR>0){
-    pbClip.style.display='block';
-    pbClip.style.left=(start/FULL_DUR*100)+'%';
-    pbClip.style.width=(Math.max(0,(curEnd||start+1)-start)/FULL_DUR*100)+'%';
-  }
-  if(au.getAttribute('src')!==FULL_URL){
-    au.src=FULL_URL;au.load();pendingSeek=start;
-    au.addEventListener('loadedmetadata',function(){
-      if(pendingSeek!==null){try{au.currentTime=pendingSeek}catch(err){}pendingSeek=null}
-      const p=au.play();if(p&&p.catch)p.catch(()=>{});
-    },{once:true});
-    if(pbTime)pbTime.textContent=fmt(start)+' / '+fmt(FULL_DUR);
-    return;
-  }
-  try{au.currentTime=start}catch(err){}
-  const p=au.play();if(p&&p.catch)p.catch(()=>toast('播放被拦截，点播放条 ▶ 重试'));
+function sync() {
+  if (!au) return;
+  const total = au.duration || D.duration || 0;
+  const now = au.currentTime || 0;
+  $('#pb-fill').style.width = (total > 0 ? Math.min(100, now / total * 100) : 0) + '%';
+  const clip = $('#pb-clip');
+  if (cur && cur.end && total > 0) {
+    clip.style.display = 'block';
+    clip.style.left = (cur.start / total * 100) + '%';
+    clip.style.width = Math.max(0.4, (cur.end - cur.start) / total * 100) + '%';
+  } else { clip.style.display = 'none'; }
+  $('#pb-time').textContent = fmt(now) + ' / ' + fmt(total)
+    + (cur ? (cur.end ? ' · ' + t('pb_clip', { a: fmt(cur.start), b: fmt(cur.end) })
+                       : ' · ' + t('pb_cont')) : '');
+  $('#pb-toggle').innerHTML = (au.paused || au.ended)
+    ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.29-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z"/></svg>'
+    : '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4h3.4v16H7zM13.6 4H17v16h-3.4z"/></svg>';
 }
-function syncBar(){
-  if(!au)return;
-  const d=au.duration||(SEGS[curCid]?SEGS[curCid].dur:0)||FULL_DUR||0;
-  const t=au.currentTime||0;
-  if(pbFill)pbFill.style.width=(d>0?Math.min(100,t/d*100):0)+'%';
-  if(pbTime)pbTime.textContent=fmt(t)+' / '+fmt(d);
-  if(pbToggle)pbToggle.textContent=(au.paused||au.ended)?'▶':'❚❚';
-}
-if(au){
-  au.addEventListener('timeupdate',()=>{
-    if(curEnd!==null&&au.currentTime>=curEnd){au.pause();curEnd=null;toast('片段结束')}
-    syncBar();
+if (au) {
+  au.addEventListener('timeupdate', () => {
+    if (cur && cur.end && au.currentTime >= cur.end) {
+      au.pause(); toast(t('finished'));
+      const host = cur.kind === 'arc' ? $('#arc-' + cur.id) : $('#claim-' + cur.id);
+      if (host) host.classList.remove('playing');
+      cur.end = 0; cur.start = au.currentTime;
+    }
+    sync();
   });
-  au.addEventListener('play',syncBar);
-  au.addEventListener('pause',syncBar);
-  au.addEventListener('ended',syncBar);
-  au.addEventListener('loadedmetadata',syncBar);
-  au.addEventListener('error',()=>{
-    const c=au.error?au.error.code:0;
-    const m={1:'加载被中断',2:'网络错误',3:'解码失败',4:'格式不支持或地址不可达'}[c]||'未知错误';
-    toast('音频无法播放：'+m);
+  ['play', 'pause', 'ended', 'loadedmetadata'].forEach(ev => au.addEventListener(ev, sync));
+  au.addEventListener('error', () => {
+    const code = au.error ? au.error.code : 0;
+    const why = t('err_' + code) === 'err_' + code ? t('err_0') : t('err_' + code);
+    toast(t('audio_err', { why: why }));
   });
-  au.addEventListener('stalled',()=>{if(au.readyState<2)toast('缓冲中…')});
 }
-if(pbToggle)pbToggle.addEventListener('click',()=>{
-  if(!au||!au.src)return;
-  if(au.paused){const p=au.play();if(p&&p.catch)p.catch(()=>toast('播放被拦截，请再点一次'))}
-  else au.pause();
-});
-if(pbTrack)pbTrack.addEventListener('click',ev=>{
-  if(!au||!au.duration)return;
-  const r=pbTrack.getBoundingClientRect();
-  au.currentTime=Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))*au.duration;
-  syncBar();
-});
 
-/* ---------- 启动（脚本在 body 末尾，元素已就绪） ---------- */
-renderPicks();
+/* ---------- 目录（窄屏抽屉） ---------- */
+function toggleSheet(open) {
+  const sheet = $('#navsheet'), btn = $('#navmore'); if (!sheet) return;
+  const state = open === undefined ? sheet.hidden : open;
+  sheet.hidden = !state;
+  if (btn) { btn.setAttribute('aria-expanded', String(state)); }
+}
+
+/* ---------- 提示 ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const t = $('#toast'); if (!t) return;
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ---------- 深链： #arc-a03 / #claim-c21 / #picks=a01,c05 ---------- */
+function openHash() {
+  const raw = decodeURIComponent((location.hash || '').replace(/^#/, '')).trim();
+  if (!raw) return;
+  if (raw.startsWith('picks=')) {
+    const ids = raw.slice(6).split(',').map(s => s.trim()).filter(Boolean);
+    picks = ids.map(id => ({ kind: D.arcs[id] ? 'arc' : 'claim', id: id }));
+    try { localStorage.setItem(STORE, JSON.stringify(picks)); } catch (e) {}
+    paintPicks(); setMine(true); toast(t('picks_view', { n: picks.length }));
+    return;
+  }
+  const arc = D.arcs[raw] ? raw : (D.claims[raw] ? D.claims[raw].arc_id : null);
+  if (D.claims[raw]) { gotoClaim(raw); return; }
+  if (arc) {
+    const el = $('#arc-' + arc); if (!el) return;
+    const head = $('.av-arc-h', el); if (head) toggleBox(head, true);
+    scrollTo(el); flash(el);
+  }
+}
+
+/* ---------- 事件绑定 ---------- */
+document.addEventListener('click', (ev) => {
+  const star = ev.target.closest('[data-star]');
+  if (star) {
+    ev.stopPropagation();
+    const [k, id] = star.dataset.star.split(':');
+    togglePick(k, id); return;
+  }
+  const playBtn = ev.target.closest('[data-play]');
+  if (playBtn) {
+    ev.stopPropagation();
+    const [k, id] = playBtn.dataset.play.split(':');
+    play(k, id); return;
+  }
+  const rel = ev.target.closest('[data-goto]');
+  if (rel) { ev.stopPropagation(); gotoClaim(rel.dataset.goto); return; }
+  const tgl = ev.target.closest('[data-toggle]');
+  if (tgl) { toggleBox(tgl); return; }
+  const nav = ev.target.closest('#navmore'); if (nav) { toggleSheet(); return; }
+  const navx = ev.target.closest('#navsheetx'); if (navx) { toggleSheet(false); return; }
+  const navLink = ev.target.closest('#navsheet a'); if (navLink) toggleSheet(false);
+  const langBtn = ev.target.closest('[data-lang]');
+  if (langBtn) { applyLang(langBtn.dataset.lang); return; }
+  const seg = ev.target.closest('.om-seg button');
+  if (seg) { setMine(seg.dataset.mine === 'true'); return; }
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const tgl = ev.target.closest('[data-toggle]');
+  if (tgl) { ev.preventDefault(); toggleBox(tgl); }
+});
+if ($('#themebtn')) $('#themebtn').addEventListener('click', toggleTheme);
+if ($('#sharebtn')) $('#sharebtn').addEventListener('click', shareView);
+if ($('#exportbtn')) $('#exportbtn').addEventListener('click', exportPicks);
+if ($('#pb-toggle')) $('#pb-toggle').addEventListener('click', () => {
+  if (!au || !au.src) { toast(t('pick_first')); return; }
+  if (au.paused) { const p = au.play(); if (p && p.catch) p.catch(() => {}); } else au.pause();
+});
+if ($('#pb-track')) $('#pb-track').addEventListener('click', (ev) => {
+  if (!au || !au.duration) return;
+  const r = ev.currentTarget.getBoundingClientRect();
+  try { au.currentTime = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * au.duration; } catch (e) {}
+  sync();
+});
+window.addEventListener('hashchange', openHash);
+let savedLang = null;
+try { savedLang = localStorage.getItem('heron-lang'); } catch (e) {}
+applyLang(savedLang || DEFAULT_LANG, false);
+openHash();
 """
 
 
-def render(card: dict, seg_dir=None, mode="audio", chrome=True) -> str:
-    """mode="audio"    内联片段 / 整集流播，页面自带播放条
-       mode="redirect" 纯导流：不内联音频、不请求 CDN，点时间戳只复制定位提示
-       chrome=False    去掉推荐编辑与工具条（分享给读者看的干净版）"""
+def render(
+    card: dict,
+    seg_dir=None,
+    mode="audio",
+    chrome=True,
+    arcs=None,
+    langs: list[str] | None = None,
+    default_lang: str | None = None,
+) -> str:
+    """mode="audio"    自绘播放器（整集流播，或 `--seg` 目录的内联片段）
+       mode="redirect" 纯导流：不内联音频、不发音频请求，点时间戳只复制定位提示
+       arcs             话题弧列表；给了就按弧渲染，否则退回逐句视图
+       langs/default_lang  多语言代码；不传就是单语（中文）"""
+    set_langs(langs, default_lang)
     segs_map, full_url = load_segments(card, seg_dir)
     redirect = mode == "redirect"
     if redirect:
         segs_map, full_url = {}, ""
 
-    src = card["source"]
-    claims = card["claims"]
-    people = {p["person_id"]: p for p in card.get("people", [])}
-    title = src.get("title") or card.get("content_id") or "知识卡"
+    src = card.get("source", {}) or {}
+    claims_list = card.get("claims", []) or []
+    claims = {c["claim_id"]: c for c in claims_list}
+    people = {p["person_id"]: p for p in card.get("people", []) or []}
+    title = src.get("title") or card.get("content_id") or C("card_fallback")
+    title_text = TX(title)
+    content_id = card.get("content_id") or src.get("content_id") or ""
 
     groups = build_groups(card)
-    rendered = set()
-    used = {cid for _, _, ids in groups for cid in ids if cid in {c["claim_id"] for c in claims}}
-    missing = [c["claim_id"] for c in claims if c["claim_id"] not in used]
+    used = {cid for _, _, ids in groups for cid in ids if cid in claims}
+    missing = [c["claim_id"] for c in claims_list if c["claim_id"] not in used]
     if missing:
-        groups.append(("gx", f"未入组 {len(missing)} 条", missing))
+        groups.append(("gx", C("ungrouped", n=len(missing)), missing))
 
-    # ── 导航 + 各主题 section ──
-    nav_items = []
+    arc_list = [a for a in (arcs or []) if a.get("arc_id")]
+    arc_by_id = {a["arc_id"]: a for a in arc_list}
+    title_of_claim_arc = {}
+    for a in arc_list:
+        for cid in (a.get("evidence") or []):
+            title_of_claim_arc[cid] = a["arc_id"]
+
     sections = []
-    total_rels = 0
+    items: list[tuple[str, str, int, str]] = []   # (锚点, 组名, 段/条数, 颜色)
+    placed_arcs: set[str] = set()
     for gi, (gid, gname, ids) in enumerate(groups):
         color = GROUP_COLORS[gi % len(GROUP_COLORS)]
-        rows = []
-        for cid in ids:
-            c = next((x for x in claims if x["claim_id"] == cid), None)
-            if not c or cid in rendered:
+        name = strip_group_no(gname)
+        sid = f"s-arc-{gi}" if arc_list else f"s-{gid}"
+        if arc_list:
+            # 一个分组里的弧 = 该组 claim 所属的弧（保住顺序）。
+            # 同一弧的 claim 可能横跨两个分组，但弧只能出现一次——先匹配到哪组就归哪组，
+            # 否则同一段会在两个标题下重复出现。
+            arc_ids = []
+            for cid in ids:
+                aid = title_of_claim_arc.get(cid)
+                if aid and aid not in placed_arcs and aid not in arc_ids:
+                    arc_ids.append(aid)
+            if not arc_ids:
                 continue
-            rendered.add(cid)
-            speaker = people.get(c.get("speaker"), {}).get("name", c.get("speaker", ""))
-            total_rels += len(c.get("relations", []) or [])
-            rows.append(claim_row(c, speaker, cid_attr=True))
-        if not rows:
-            continue
-        sid = f"s-{gid}"
-        nav_items.append(
-            f'<a href="#{esc_attr(sid)}" data-nav="{esc_attr(gid)}">'
-            f'<i style="background:{color}"></i>{esc(strip_group_no(gname))}'
-            f'<em class="num">{len(rows)}</em></a>')
+            placed_arcs.update(arc_ids)
+            body = "".join(arc_card(arc_by_id[aid], claims, people) for aid in arc_ids)
+            count, unit = len(arc_ids), "arc"
+        else:
+            ids_in = [cid for cid in ids if cid in claims]
+            if not ids_in:
+                continue
+            body = "".join(claim_row(claims[cid], _name(people, claims[cid].get("speaker")))
+                           for cid in ids_in)
+            count, unit = len(ids_in), "claim"
+        items.append((sid, name, count, color))
+        label = C("n_segments" if unit == "arc" else "n_claims", n=count)
         sections.append(
-            f'<section id="{esc_attr(sid)}" class="om-section" data-gid="{esc_attr(gid)}">'
+            f'<section id="{esc_attr(sid)}" class="om-section" data-mine="1">'
             f'<div class="om-sh"><span class="om-dot" style="background:{color}"></span>'
-            f'<h2>{esc(strip_group_no(gname))}</h2><small>{len(rows)} 条</small></div>'
-            f'{"".join(rows)}</section>')
+            f'<h2>{T(name)}</h2>'
+            f'<small data-count="{count}" data-unit="{unit}">{T(label)}</small></div>{body}</section>'
+        )
 
-    # ── 刊头 ──
+    # ── 卡片头 ──
     kicker = (f'<span class="dh-platform">{esc(src.get("platform") or "PODCAST")}</span>'
               + (f'<time class="dh-date num">{esc(src.get("published_at"))}</time>'
                  if src.get("published_at") else ""))
+    main_people, mentioned = _people_split(card)
+    people_html = "".join(_person_chip(p) for p in main_people)
+    mentioned_html = ""
+    if mentioned:
+        mentioned_html = (
+            f'<details class="dh-mentioned"><summary>{T(C("mentioned", n=len(mentioned)))}</summary>'
+            f'<div class="dh-people dh-people-sub">'
+            + "".join(_mentioned_chip(p) for p in mentioned) + "</div></details>")
 
-    ppl = "".join(
-        f'<span class="dh-person"><span class="dh-avatar" aria-hidden="true">{esc((p.get("name") or "?")[:1])}</span>'
-        f'<span class="dh-pname">{esc(p.get("name", ""))}</span>'
-        + (f'<span class="dh-prole">{esc(p.get("role"))}</span>' if p.get("role") else "")
-        + '</span>'
-        for p in card.get("people", [])[:6])
-
-    stats = (f'<span><b class="num">{len(claims)}</b> 条观点</span>'
-             f'<span><b class="num">{len(sections)}</b> 个主题</span>'
-             f'<span><b class="num">{total_rels}</b> 条关系</span>')
+    n_units = len(arc_list) if arc_list else len(claims_list)
+    stats = (
+        f'<span>{T(C("n_segments" if arc_list else "n_claims", n=n_units))}</span>'
+        f'<span>{T(C("claims_count", n=len(claims_list)))}</span>'
+    )
     if src.get("url"):
         stats += (f'<a class="dh-link" href="{esc_attr(src["url"])}" target="_blank" '
-                  f'rel="noopener noreferrer">原节目 ↗</a>')
-    if src.get("duration_sec"):
-        stats += f'<span class="num">{mmss(src["duration_sec"])}</span>'
+                  f'rel="noopener noreferrer">{T(C("original"))}</a>')
 
     # ── 工具条 ──
-    bar = ""
+    n_arcs_hint = (
+        C("hint_arcs", n=len(arc_list), m=len(claims_list))
+        if arc_list
+        else C("hint_claims", m=len(claims_list))
+    )
+    bar_html = ""
     if chrome:
-        bar = (
+        bar_html = (
             '<div class="om-bar"><div class="om-bar-row">'
-            '<div class="om-seg" role="group" aria-label="筛选">'
-            '<button type="button" data-mine="false" aria-pressed="true" '
-            'onclick="setFilter(false)">全部</button>'
-            '<button type="button" data-mine="true" aria-pressed="false" '
-            'onclick="setFilter(true)">我的推荐 <span id="minecount" class="num">0</span></button>'
-            '</div>'
-            '<button type="button" class="om-edit" id="editbtn" '
-            'onclick="toggleEdit()">✎ 编辑推荐</button>'
-            '<span class="om-hint">点行展开关系与语料 · 点时间戳回链原声</span>'
-            '</div></div>')
+            f'<div class="om-seg" role="group" {TA(C("filter"), "aria-label")}>'
+            f'<button type="button" data-mine="false" aria-pressed="true">{T(C("all"))}</button>'
+            f'<button type="button" data-mine="true" aria-pressed="false">{T(C("mine"))} '
+            '<span class="num" id="minecount">0</span></button></div>'
+            f'<button type="button" class="om-share" id="sharebtn" hidden>{T(C("share"))}</button>'
+            f'<button type="button" class="om-share" id="exportbtn" hidden {TA(C("export_title"))}>{T(C("export"))}</button>'
+            f'<span class="om-hint" id="omhint" {T_ATTRS(n_arcs_hint)}>{esc(TX(n_arcs_hint))}</span>'
+            "</div></div>")
 
-    nav_top = (
-        f'<a href="#s-top" id="nav-top" style="display:none">'
-        f'<i style="background:var(--accent)"></i>我的推荐<em class="num">0</em></a>'
-        if chrome else "")
+    nav_strip, nav_more, nav_sheet = _nav_items(items)
 
-    top_section = (
-        '<section id="s-top" class="om-section hide">'
-        '<div class="om-sh"><span class="om-dot" style="background:var(--accent)"></span>'
-        '<h2>我的推荐</h2><small id="pickscount">0 条</small></div>'
-        '<div id="pickslist"></div></section>'
-        if chrome else "")
+    # ── 评论区（站点是登录后可用；本地页只留位置，避免版式缺一块） ──
+    cm_html = (
+        f'<section class="cm" id="comments"><div class="cm-chd"><h2>{T(C("comments"))}</h2></div>'
+        f'<p class="cm-sub">{T(C("comments_sub"))}</p>'
+        f'<div class="rec-login-hint">{T(C("comments_hint"))} '
+        f'<a href="{SITE}/cards/{esc_attr(content_id)}" target="_blank" rel="noopener" '
+        'style="color:var(--accent)">heronai.top</a></div></section>')
 
-    # ── 播放条 / 导流条 ──
+    # ── 播放条 ──
     if redirect:
         player = (
-            '<div id="origbar">'
-            f'<a class="orig-link" href="{esc_attr(src.get("url", ""))}" target="_blank" rel="noopener">'
-            '<span class="orig-ico">◉</span>'
-            f'<span class="orig-txt"><b>{esc(src.get("platform") or "原平台")}</b>'
-            + (f'　{esc(src.get("series", ""))}' if src.get("series") else "")
-            + (f' EP.{esc(src.get("episode_no", ""))}' if src.get("episode_no") else "")
-            + (f'　·　全程 {mmss(src["duration_sec"])}' if src.get("duration_sec") else "")
-            + '</span><span class="orig-go">去听原声 →</span></a>'
-            '<div class="orig-hint" id="orig-hint">点任一条的时间戳：自动复制「第 X 分钟」定位提示，'
-            '回到原平台拖到该处即可。</div></div>')
+            '<div class="playerbar" id="playerbar" hidden>'
+            '<button type="button" class="pb-toggle" id="pb-toggle" aria-label="播放/暂停">▶</button>'
+            f'<div class="pb-info"><div class="pb-stmt" id="pb-stmt">{T(C("player_redirect"))}</div>'
+            '<div class="pb-track" id="pb-track"><div class="pb-clip" id="pb-clip" style="display:none"></div>'
+            '<div class="pb-fill" id="pb-fill"></div></div>'
+            '<div class="pb-time" id="pb-time">0:00</div></div></div>'
+            f'<a class="dh-link" href="{esc_attr(src.get("url", ""))}" target="_blank" rel="noopener" '
+            'style="display:block;margin-top:24px">完整节目 ↗</a>')
     else:
         player = (
-            '<div class="playerbar" id="playerbar">'
-            '<button type="button" class="pb-toggle num" id="pb-toggle" aria-label="播放/暂停">▶</button>'
-            '<div class="pb-info">'
-            '<div class="pb-stmt" id="pb-stmt">点上方任一观点的时间戳开始</div>'
-            '<div class="pb-track" id="pb-track"><div class="pb-clip" id="pb-clip"></div>'
-            '<div class="pb-fill" id="pb-fill"></div></div>'
+            '<div class="playerbar" id="playerbar" hidden>'
+            '<button type="button" class="pb-toggle" id="pb-toggle" aria-label="播放/暂停">'
+            '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+            '<path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.29-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z"/></svg>'
+            "</button>"
+            f'<div class="pb-info"><div class="pb-stmt" id="pb-stmt">{T(C("player_pick"))}</div>'
+            '<div class="pb-track" id="pb-track"><div class="pb-clip" id="pb-clip" '
+            'style="display:none"></div><div class="pb-fill" id="pb-fill"></div></div>'
             '<div class="pb-time" id="pb-time">0:00</div></div>'
             '<audio id="au" preload="metadata"></audio></div>')
 
-    export_panel = ""
-    if chrome:
-        export_panel = (
-            '<div id="exportpanel">'
-            '<div class="ep-hd">推荐改完后：生成新页面直接带走，或复制 JSON 回填卡片</div>'
-            '<textarea id="exptext" readonly onclick="this.select()"></textarea>'
-            '<div class="ep-btns">'
-            '<button type="button" class="primary" onclick="exportPage()">⤓ 生成编辑后的页面</button>'
-            '<button type="button" onclick="copyExport()">⧉ 复制 JSON</button>'
-            '<button type="button" onclick="downloadExport()">下载 .json</button>'
-            '<button type="button" onclick="toggleEdit()">完成</button>'
-            '</div></div>')
-
     # ── JS 数据 ──
-    claims_js = {}
-    for c in claims:
-        claims_js[c["claim_id"]] = {
+    claims_js = {
+        cid: {
             "statement": c.get("statement", ""),
             "timestamp": c.get("timestamp", ""),
             "end": c.get("end", ""),
             "type": c.get("type", ""),
-            "confidence": c.get("confidence", ""),
-            "evidence": c.get("evidence", ""),
-            "speakerName": people.get(c.get("speaker"), {}).get("name", c.get("speaker", "")),
-            "rels": [{"type": r.get("type", ""), "target": r.get("target", ""),
-                      "note": r.get("note", "")} for r in (c.get("relations") or [])],
+            "arc_id": title_of_claim_arc.get(cid, ""),
         }
-    used_types = sorted({r.get("type") for c in claims for r in (c.get("relations") or [])
-                         if r.get("type")})
-
-    body_cls = " ".join(x for x in ([] if chrome else ["no-chrome"]) + (["redirect"] if redirect else []))
-    scripts = (JS.replace("__REL_CN__", js({t: REL_CN.get(t, t) for t in used_types}))
-                 .replace("__COLORS__", js({t: REL_COLOR.get(t, "#868e96") for t in used_types}))
-                 .replace("__SEGS__", js(segs_map))
-                 .replace("__AUDIO__", js(full_url))
-                 .replace("__FULL_DUR__", str(int(src.get("duration_sec") or 0)))
-                 .replace("__ORIG_URL__", js(src.get("url", "")))
+        for cid, c in claims.items()
+    }
+    arcs_js = {a["arc_id"]: {"title": a.get("title", ""), "summary": a.get("summary", ""),
+                             "start": a.get("start", ""), "end": a.get("end", "")}
+               for a in arc_list}
+    data = {
+        "content_id": content_id,
+        "arcs": arcs_js,
+        "claims": claims_js,
+        "segs": segs_map,
+        "audio": full_url,
+        "duration": int(src.get("duration_sec") or 0),
+        "platform": src.get("platform", ""),
+        "series": src.get("series", ""),
+    }
+    doc_titles = {}
+    for code in _LANGS:
+        text = title.get(code) if isinstance(title, dict) else title
+        doc_titles[code] = f"{text or title_text or content_id} · HERON"
+    scripts = (JS.replace("__DATA__", js(data))
+                 .replace("__I18N__", js(JS_I18N))
+                 .replace("__LANGS__", js(_LANGS))
+                 .replace("__DEFAULT_LANG__", js(_DEFAULT))
+                 .replace("__DOC_TITLES__", js(doc_titles))
                  .replace("__REDIRECT__", "true" if redirect else "false")
-                 .replace("__CLAIMS__", js(claims_js))
-                 .replace("__CONTENT_ID__", js(card.get("content_id") or src.get("content_id", "")))
-                 .replace("__SERIES__", js(src.get("series", "")))
-                 .replace("__EPNO__", js(src.get("episode_no", "")))
-                 .replace("__PLATFORM__", js(src.get("platform", "")))
-                 .replace("__PICKS__", js(card.get("picks") or [])))
+                 .replace("__TO_SEC__", "toSec"))
+    scripts = ("function toSec(t){const q=String(t||'').match(/\\d+(?:\\.\\d+)?/g)||[];"
+               "const n=q.map(Number);"
+               "return n.length===3?Math.round(n[0]*3600+n[1]*60+n[2]):"
+               "(n.length===2?Math.round(n[0]*60+n[1]):Math.round(n[0]||0))}\n") + scripts
+
+    title_js = (f"<script>try{{var m=localStorage.getItem('heron-theme');"
+                "if(m==='light'||m==='dark')document.documentElement.setAttribute('data-theme',m);"
+                "var l=localStorage.getItem('heron-lang');"
+                "if(l){document.documentElement.lang=(l==='zh'?'zh-CN':l);"
+                "document.documentElement.dataset.lang=l}}"
+                "catch(e){}</script>")
+    body_cls = "" if chrome else "no-chrome"
+
+    lang_switch = ""
+    if len(_LANGS) > 1:
+        buttons = "".join(
+            f'<button type="button" data-lang="{esc_attr(code)}" '
+            f'aria-pressed="{"true" if code == _DEFAULT else "false"}">'
+            f"{esc(LANG_LABEL.get(code, code.upper()))}</button>"
+            for code in _LANGS
+        )
+        lang_switch = (
+            f'<div class="langsw" role="group" {TA(C("lang_group"), "aria-label")}>'
+            f"{buttons}</div>"
+        )
 
     return f"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{'zh-CN' if _DEFAULT == 'zh' else _DEFAULT}" data-lang="{esc_attr(_DEFAULT)}" class="VNkuCW_variable VxV-Ta_variable">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101012" media="(prefers-color-scheme: dark)">
-<title>{esc(title)} · HERON</title>
-<script>try{{var t=localStorage.getItem('heron-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}}catch(e){{}}</script>
-<style>{CSS}</style>
+<title>{esc(doc_titles[_DEFAULT])}</title>
+<meta name="description" content="{esc(TX(C("description", title=title_text)))}">
+{title_js}
+<style>{load_css()}{LOCAL_CSS}</style>
 </head>
 <body class="{body_cls}">
 <header class="topbar">
-  <h1 class="brand">HERON</h1>
-  <span class="tb-spacer"></span>
-  <button type="button" class="theme-btn" id="themebtn" onclick="toggleTheme()" aria-label="切换主题">☀</button>
+  <h1 class="brand" role="button" tabindex="0" {TA(C("home"), "aria-label")}>{esc("HERON")}</h1>
+  <div class="topbar-right">
+    {lang_switch}
+    <a class="topbar-submit" href="{SITE}/submit" target="_blank" rel="noopener noreferrer">{T(C("submit"))}</a>
+    <button type="button" class="um-trigger" id="themebtn" aria-label="theme">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"></path></svg>
+      <span class="um-trigger-label">{T(C("theme"))}</span>
+    </button>
+  </div>
 </header>
 <main class="page">
+  <a class="back" href="{SITE}">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m0 0l6-6m-6 6l6 6"></path></svg>
+    {T(C("back"))}
+  </a>
   <article class="detail">
     <header class="detail-hero">
       <div class="dh-kicker">{kicker}</div>
-      <h2 class="detail-title">{esc(title)}</h2>
-      {f'<div class="dh-people">{ppl}</div>' if ppl else ''}
+      <h2 class="detail-title">{T(title)}</h2>
+      {f'<div class="dh-people-wrap"><div class="dh-people">{people_html}</div>{mentioned_html}</div>' if people_html or mentioned_html else ''}
       <div class="dh-stats">{stats}</div>
     </header>
+    <div class="rec-login-hint">{T(C("local_hint"))}</div>
     <div class="om">
-      {bar}
+      {bar_html}
       <div class="om-layout">
-        <nav class="om-nav" aria-label="主题导航">{nav_top}{''.join(nav_items)}</nav>
-        <main>{top_section}{''.join(sections) or '<p class="om-empty">这张卡没有可展示的观点。</p>'}</main>
+        <nav class="om-nav" {TA(C("nav"), "aria-label")}>
+          <div class="om-nav-strip">{nav_strip}</div>
+          {nav_more}
+          {nav_sheet}
+        </nav>
+        <main>{''.join(sections) or f'<p class="om-empty">{T(C("empty"))}</p>'}</main>
       </div>
     </div>
+    {cm_html}
   </article>
 </main>
 {player}
-{export_panel}
 <div id="toast"></div>
 <script>{scripts}</script>
 </body>
 </html>"""
-

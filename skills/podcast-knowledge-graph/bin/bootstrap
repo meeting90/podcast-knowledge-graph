@@ -1,0 +1,31 @@
+#!/bin/sh
+# Thin launcher: `bin/bootstrap` == `python3 bin/bootstrap.py`.
+# The skill is just files; this makes the runtime one command away even when
+# nobody wants to spell out the interpreter.
+#
+# It probes each candidate interpreter before using it: on Windows,
+# `python`/`python3` are often App Execution Aliases that open the Store and
+# exit non-zero instead of running anything.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+usable() {
+	command -v "$1" >/dev/null 2>&1 || return 1
+	"$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+		>/dev/null 2>&1
+}
+
+if [ -n "${PODCAST_KG_PYTHON:-}" ] && usable "$PODCAST_KG_PYTHON"; then
+	exec "$PODCAST_KG_PYTHON" "$here/bootstrap.py" "$@"
+fi
+for py in python3 python; do
+	if usable "$py"; then
+		exec "$py" "$here/bootstrap.py" "$@"
+	fi
+done
+
+# No usable interpreter: uv can provide one, but uv needs installing first.
+echo "bootstrap: 需要 Python 3.10+（或先装 uv，它会连解释器一起准备好）：" >&2
+echo "  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+echo "然后： python3 $here/bootstrap.py" >&2
+exit 1
