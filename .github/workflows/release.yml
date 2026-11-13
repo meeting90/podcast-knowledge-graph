@@ -28,7 +28,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Never tag a tree that fails on a supported Python version.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Unit tests (stdlib only)
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: Validate the skill package
+        run: python scripts/package_skill.py --check
+      - name: Validate the four version locations
+        run: python scripts/bump_version.py --check
+
   release:
+    needs: test
     # Runs after every merge to main. If v<version> already exists this is a
     # no-op, so merging a PR that does not bump the version changes nothing.
     runs-on: ubuntu-latest

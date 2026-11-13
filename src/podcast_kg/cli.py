@@ -211,7 +211,8 @@ def cmd_render(args: argparse.Namespace) -> int:
     relations = sum(len(c.get("relations", [])) for c in card.get("claims", []))
     unit = f"{len(arcs)} 段话题弧" if arcs else "逐句视图"
     languages = f" · {'/'.join(langs)} 可切换" if langs else ""
-    print(f"内联片段: {html.count('\"b64\"')} 段")
+    inline_clips = html.count('"b64"')
+    print(f"内联片段: {inline_clips} 段")
     print(
         f"HTML: {out} ({len(card.get('claims', []))} claims, {relations} relations, "
         f"{unit}{languages})"
