@@ -1,0 +1,64 @@
+name: pypi
+
+# Publish the wheel/sdist for a release tag.
+#
+# Preferred auth is PyPI Trusted Publishing (OIDC, no token): add a pending
+# publisher on PyPI with
+#   project      podcast-kg
+#   owner        meeting90
+#   repository   podcast-knowledge-graph
+#   workflow     pypi.yml
+# Then run this workflow for v0.1.0 (release published or manual dispatch).
+#
+# Token fallback: create a PyPI API token, add it as the `PYPI_API_TOKEN`
+# secret, and pass `password: ${{ secrets.PYPI_API_TOKEN }}` to the action.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (must match pyproject.toml, e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify the tag matches the package version
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(python scripts/bump_version.py --print)
+          if [ "v$V" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match pyproject version v$V"
+            exit 1
+          fi
+          python scripts/bump_version.py --check
+
+      - name: Build wheel + sdist
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true

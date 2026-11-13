@@ -366,16 +366,37 @@ Maintenance / Other. When the PR title uses a Conventional Commits prefix (`feat
 `chore:` …, including `feat(api)!:`), `pr-label.yml` adds the matching label automatically; add the
 `skip-changelog` label to hide a PR from the notes.
 
-### Publishing to PyPI (makes `uv tool install "podcast-kg[all]"` work)
+### Why publish to PyPI (and what breaks without it)
 
-```bash
-uv build                 # dist/*.whl + *.tar.gz
-uv publish               # or: twine upload dist/*
-```
+`podcast-kg` is not a private name in this repo — it is a **distribution name on PyPI**. Without a
+publish, every “install by name” path fails:
 
-When bumping a version, update four places: `version` in `pyproject.toml`, `__version__` in
-`src/podcast_kg/__init__.py`, `skills/podcast-knowledge-graph/runtime.json`, and `PIN_VERSION`
-in `bin/bootstrap.py` (`tests/test_package.py` asserts the last three match).
+| Without PyPI | Impact |
+| --- | --- |
+| `uv tool install "podcast-kg[all]"` / `pip install` / `pipx` / `uvx` | all fail with `No solution found`; docs must point at git or a local path |
+| the skill's `bin/bootstrap.py` | every run queries PyPI (404) then falls back to git: needs `git` and GitHub access; CI/containers often have pip but no git, and GitHub is unreliable from some networks (PyPI has mirrors) |
+| version pinning and audit | no `podcast-kg==0.1.0`, no `pip download` wheelhouse, no dependency scanners / SBOM |
+| marketplace review | “runtime comes from PyPI” is much easier to explain than “git install” |
+
+**The cost is not “it cannot be installed”**: skill files, the stdlib-only commands
+(`render/verify/ingest/i18n`), and git/local installs all keep working. The cost lands on
+**a first-time user installing the CLI** and on **environments without git or with weak GitHub access**.
+
+### Publishing (configure once, then every tag)
+
+1. One-time: PyPI → *Publishing* → *Add a pending publisher*:
+   project `podcast-kg`, owner `meeting90`, repository `podcast-knowledge-graph`, workflow `pypi.yml`.
+   The OIDC workflow is already in the repo (`.github/workflows/pypi.yml`) — **no API token needed**.
+2. Trigger: `gh workflow run pypi.yml -f tag=v0.1.0`, or publish a GitHub Release.
+3. Local manual publish (needs a token): `uv build && uv publish` (or `twine upload dist/*`).
+4. Verify: `pip index versions podcast-kg`, `uv tool install "podcast-kg[all]"`.
+
+The version lives in four places (`pyproject.toml`, `__init__.py`, `runtime.json`, `PIN_VERSION` in
+`bootstrap.py`); use `python scripts/bump_version.py patch|minor|major`. `pypi.yml` refuses to publish
+when the tag and the package version disagree.
+
+> PyPI versions are immutable: a bad release can only be yanked and followed by a new version.
+> Do a `uv build` + `twine check` first (both currently pass).
 
 ## Layout
 

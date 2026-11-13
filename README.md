@@ -370,16 +370,33 @@ gh release create v0.2.0 dist/podcast-knowledge-graph-0.2.0.zip --generate-notes
 PR 标题用 Conventional Commits 前缀（`feat:` / `fix:` / `docs:` / `chore:` …，支持 `feat(api)!:`）时，
 `pr-label.yml` 会自动打对应标签；不想出现在 notes 里就给 PR 加 `skip-changelog` 标签。
 
-### 发布到 PyPI（让 `uv tool install "podcast-kg[all]"` 生效）
+### 为什么发 PyPI（不发会怎样）
 
-```bash
-uv build                 # dist/*.whl + *.tar.gz
-uv publish               # 或：twine upload dist/*
-```
+`podcast-kg` 不是本仓库私有的名字，它是 **PyPI 上的发行名**。不发，所有“按名字装”的路径都会断：
 
-发布新版本时同步四处：`pyproject.toml` 的 `version`、`src/podcast_kg/__init__.py` 的 `__version__`、
-`skills/podcast-knowledge-graph/runtime.json`、`bin/bootstrap.py` 的 `PIN_VERSION`
-（`tests/test_package.py` 会校验后三者一致）。
+| 不发 PyPI | 影响 |
+| --- | --- |
+| `uv tool install "podcast-kg[all]"` / `pip install` / `pipx` / `uvx` | 全部 `No solution found`，文档只能写 git / 本地路径 |
+| skill 的 `bin/bootstrap.py` | 每次都先查 PyPI（404）再回退 git：要求机器有 `git` 且能连 GitHub；CI/容器常常只有 pip，国内网络 GitHub 也不稳（PyPI 有镜像） |
+| 版本锁定与审计 | 不能 `podcast-kg==0.1.0`、不能 `pip download` 做离线 wheelhouse、依赖扫描/SBOM 认的是 PyPI |
+| Marketplace 审核 | “运行时从 PyPI 装”比“从 git 装”更容易解释与复核 |
+
+**不发的代价不是“装不上”**：skill 文件、`render/verify/ingest/i18n` 这些纯标准库命令、以及 git/本地安装都照常；
+代价集中在**普通用户第一次装 CLI** 和**无 git / 弱网环境**。
+
+### 发布步骤（一次配置，之后随 tag 自动）
+
+1. 首次：PyPI → *Publishing* → *Add a pending publisher*：
+   project `podcast-kg`、owner `meeting90`、repository `podcast-knowledge-graph`、workflow `pypi.yml`。
+   仓库里已备好 OIDC 工作流（`.github/workflows/pypi.yml`），**不需要 API token**。
+2. 触发：`gh workflow run pypi.yml -f tag=v0.1.0`；或发布 GitHub Release 时自动触发。
+3. 想本地手动发（需要 token）：`uv build && uv publish`（或 `twine upload dist/*`）。
+4. 验证：`pip index versions podcast-kg`、`uv tool install "podcast-kg[all]"`。
+
+版本号在 4 处（`pyproject.toml`、`__init__.py`、`runtime.json`、`bootstrap.py` 的 `PIN_VERSION`），
+用 `python scripts/bump_version.py patch|minor|major` 同步；`pypi.yml` 会先校验 tag 与版本一致。
+
+> PyPI 版本不可覆盖：发错了只能 yank 再发下一个版本。先在 TestPyPI 或 `uv build` + `twine check` 过一遍（当前两者均通过）。
 
 ## 目录结构
 
