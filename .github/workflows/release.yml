@@ -45,6 +45,8 @@ jobs:
         run: python scripts/package_skill.py --check
       - name: Validate the four version locations
         run: python scripts/bump_version.py --check
+      - name: Validate the vendored CLI
+        run: python scripts/sync_skill_lib.py --check
 
   release:
     needs: test

@@ -202,9 +202,14 @@ def _skill_resource():
     packaged = resources.files("podcast_kg").joinpath("skill")
     if packaged.is_dir():
         return packaged
-    fallback = Path(__file__).resolve().parent.parent.parent / "skills" / SKILL_NAME
+    here = Path(__file__).resolve()
+    fallback = here.parent.parent.parent / "skills" / SKILL_NAME
     if fallback.is_dir():
         return fallback
+    # vendored: <skill>/lib/podcast_kg/skill_install.py -> <skill>
+    vendored = here.parent.parent.parent
+    if (vendored / "SKILL.md").is_file() and (vendored / "lib" / "podcast_kg").is_dir():
+        return vendored
     return packaged
 
 
@@ -315,6 +320,28 @@ def _copy_tree(src, dest: Path) -> None:
             _copy_tree(entry, target)
         else:
             target.write_bytes(entry.read_bytes())
+
+
+def _sync_lib(skill_dir: Path) -> None:
+    """Refresh the vendored CLI inside an installed skill from this package.
+
+    The skill must run without a separately published wheel, so `lib/` is part
+    of every install; it has to match the CLI that installed it.
+    """
+    source = Path(__file__).resolve().parent
+    dest = skill_dir / "lib" / "podcast_kg"
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    for path in sorted(source.rglob("*")):
+        if path.is_dir() or path.suffix == ".pyc" or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(source)
+        if rel.parts[0] == "skill":
+            continue
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
 
 
 def _install_skill(skill_dir: Path, force: bool, dry_run: bool) -> str:
@@ -444,6 +471,8 @@ def install(
             from .runtime import write_pin
 
             pin = write_pin(skill_dir, force=True)
+            if skill_action in ("installed", "updated"):
+                _sync_lib(skill_dir)
         pointers = []
         if entry["instructions"]:
             block = pointer_block(skill_dir)

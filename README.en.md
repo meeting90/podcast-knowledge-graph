@@ -32,30 +32,34 @@ Every claim carries an **audio timestamp range**, so it can link straight back t
 
 ## Install
 
+The skill **ships its own CLI** (`skills/podcast-knowledge-graph/lib/podcast_kg`): once installed,
+`render / verify / ingest / i18n / models / install-skill` work offline with the standard library.
+Only `transcribe` needs a one-time install of `faster-whisper` (hundreds of MB) into a private venv.
+**There is no separate `podcast-kg` package to publish or install.**
+
 ### Option A: install with `npx skills` from skills.sh (recommended, any agent)
 
-The repo already uses the layout it expects (`skills/<name>/SKILL.md`), so no extra packaging:
+The repo already uses the layout it expects (`skills/<name>/SKILL.md`):
 
 ```bash
 npx skills add meeting90/podcast-knowledge-graph -l                    # list skills in the repo
-npx skills add meeting90/podcast-knowledge-graph --agent claude-code -y     # install for Claude (symlinks by default)
-npx skills add meeting90/podcast-knowledge-graph --agent '*'          # every agent (installed or not)
+npx skills add meeting90/podcast-knowledge-graph --agent claude-code -y     # Claude Code
+npx skills add meeting90/podcast-knowledge-graph --agent '*'          # every agent
 ```
 
-`--agent` takes a skills.sh agent id (`claude-code`, `codex`, `cursor`, `gemini-cli`, `opencode`,
-`pi`, `github-copilot`, …); `--agent '*'` installs for every agent (`--all` is shorthand for `--skill '*' --agent '*' -y`). For agents that
-are not in that list use **`--agent universal`** (writes to `.agents/skills/`, the same location as
-`install-skill --target agents`). `npx skills add … -l` lists the skills in a repo first.
+`--agent` takes a skills.sh id (`claude-code`, `codex`, `cursor`, `gemini-cli`, `opencode`, `pi`,
+`github-copilot`, …); `--agent '*'` installs for all (`--all` adds `--skill '*'`); agents not in
+that list use **`--agent universal`** (writes `.agents/skills/`, same as
+`install-skill --target agents`).
 
-`npx skills` only links/copies files into agent directories — it **never runs install scripts**
-(Agent Skills has no postinstall hook) and does not preinstall the CLI. But **users never run uv/pip
-by hand**: the first command after install goes through the bundled launcher, which installs the
-runtime and then executes (it needs `uv` or Python ≥3.10 on the machine; if neither exists it prints
-the uv install command):
+`npx skills` only copies files and runs no install scripts, but the CLI is already inside the skill:
 
 ```bash
 python3 <skills-dir>/podcast-knowledge-graph/bin/podcast-kg.py doctor
 ```
+
+The first `transcribe` (or `models fetch`) installs `faster-whisper` into `$PODCAST_KG_HOME/venv`;
+after that it works offline.
 
 ### Option B: install as a Pi extension (Pi only)
 
@@ -68,14 +72,8 @@ Pi loads two resources:
 
 | Resource | What it does |
 | --- | --- |
-| `.pi/extensions/podcast-kg.ts` | On first session: creates a private venv, installs `podcast-kg[all]`, puts `podcast-kg` on PATH, appends the system prompt, registers `/podcast-kg` |
-| `skills/podcast-knowledge-graph/` | The skill itself: `SKILL.md`, `sop/SOP.md`, `examples/` |
-
-Dependencies are **installed by the extension**: the first Pi session fills `~/.pi/agent/cache/podcast-kg/venv` (including `faster-whisper`) once. Check it:
-
-```text
-/podcast-kg doctor        # or: podcast-kg doctor in bash
-```
+| `.pi/extensions/podcast-kg.ts` | First session: prepares the venv, puts `podcast-kg` on PATH, appends the system prompt, registers `/podcast-kg` |
+| `skills/podcast-knowledge-graph/` | The skill itself (including the vendored CLI in `lib/`) |
 
 This repo is also a runnable Pi project:
 
@@ -83,36 +81,15 @@ This repo is also a runnable Pi project:
 cd podcast-knowledge-graph && pi        # asks for trust on first run (loads .pi/extensions)
 ```
 
-### Option C: install the CLI (preinstall the runtime / go offline)
-
-> If you install through `npx skills`, **you can skip this section**: the skill installs its runtime
-> on first use. The difference here is that `install-skill` also writes a pointer block into the
-> agent's instruction file (`AGENTS.md` / `CLAUDE.md` / …), which is more reliable for agents that do
-> not scan skill directories.
-
-`uv` / `pip` do not know this repository: they treat `podcast-kg` as a **distribution name on PyPI**
-(equivalent to `podcast_kg`) and query the default index `https://pypi.org/simple`; `[all]` is an
-**extra** declared in the package metadata (`Provides-Extra: all`), not a separate package. If the
-name is not found you get `No solution found … no versions of podcast-kg[all]`.
-`@ git+…` or a local path is a **direct reference**: it bypasses the index, and the name is only
-checked against the built project. `uv tool list` shows it; `uv tool uninstall podcast-kg` removes it.
-
-
+### Option C: ZIP / manual install, or install into another agent
 
 ```bash
-# Until the package is on PyPI, install from git or a local checkout (a direct reference):
-uv tool install "podcast-kg[all] @ git+https://github.com/meeting90/podcast-knowledge-graph"
-# From the repo root: uv tool install ".[all]"
+# unzip a release asset (or your local dist/*.zip) into an agent's skills directory
+unzip podcast-knowledge-graph-<version>.zip -d ~/.claude/skills/
+python3 ~/.claude/skills/podcast-knowledge-graph/bin/podcast-kg.py doctor
 
-# Only after publishing to PyPI does the plain name work:
-# uv tool install "podcast-kg[all]"   # or pipx / pip install "podcast-kg[all]"
-podcast-kg doctor
-
-podcast-kg install-skill --list                    # which agents, and where they go
-podcast-kg install-skill --target pi               # ~/.pi/agent/skills
-podcast-kg install-skill --target claude           # ~/.claude/skills
-podcast-kg install-skill --target codex            # ~/.codex/skills + AGENTS.md
-podcast-kg install-skill --target all --dry-run    # see what would be written first
+# once the skill runs, it can also install itself into other agents (and write the pointer block)
+python3 <skills-dir>/podcast-knowledge-graph/bin/podcast-kg.py install-skill --target codex
 ```
 
 | Target | User-level skills | Project-level skills (`--scope project`) | Pointer file |
@@ -126,48 +103,45 @@ podcast-kg install-skill --target all --dry-run    # see what would be written f
 | `copilot` | — (no user level) | `.github/skills/` | `.github/copilot-instructions.md` |
 | `agents` | `~/.agents/skills/` | `.agents/skills/` | `AGENTS.md` |
 
-For anything not in the table, use the two-argument form:
+For anything else: `install-skill --skills-dir DIR --instructions AGENTS.md`, or just unzip the ZIP.
+The pointer text comes from `pointer.md`; Pi's own prompt block is `.pi/APPEND_SYSTEM.md` and is never reused.
 
-```bash
-podcast-kg install-skill --skills-dir .my-agent/skills --instructions AGENTS.md
-podcast-kg install-skill --skills-dir .my-agent/skills --no-pointer   # files only
-```
+> Pick one: both the Pi extension and `npx skills add --agent pi` provide the skill; installing twice
+> creates a duplicate (Pi keeps the first and warns).
 
-The pointer text comes from `pointer.md` inside the skill (agent-neutral); Pi's own prompt block lives in `.pi/APPEND_SYSTEM.md` and is never reused.
+## Runtime: the CLI ships with the skill
 
-Each install maintains one `<!-- podcast-kg:start --> … <!-- podcast-kg:end -->` block in that agent's instruction file (pointing at the installed `SKILL.md`, `runtime.json` and `bin/bootstrap.py`) and never touches anything else. `podcast-kg uninstall-skill --target <agent>` removes only its own part (the runtime venv stays; `rm -rf "$PODCAST_KG_HOME"` removes that too).
-
-> Pick one: both the Pi extension and `npx skills add --agent pi` provide the skill; installing twice creates a duplicate (Pi keeps the first and warns).
-> After installing, `/reload` in Pi or just start a new session elsewhere.
-
-> `podcast-kg setup` / `unsetup` are kept as legacy aliases for `install-skill --target pi` / `uninstall-skill --target pi`.
-
-## Runtime guarantee: why it works right after installing
-
-The skill is only files; the work is done by the `podcast-kg` CLI. Where the runtime comes from depends on how you installed:
-
-| Install path | Who prepares the runtime | Usable right away? |
+| Install path | Where the CLI comes from | Transcribe deps |
 | --- | --- | --- |
-| Pi extension | First session creates a private venv (with `faster-whisper`) | Yes |
-| `podcast-kg install-skill` | CLI already present; `transcribe` / `ingest` install their deps on first use | Yes |
-| Files copied in (marketplace / `npx skills add` / manual clone) | Use `bin/podcast-kg.py`: it installs on first use | Yes, the first command does it |
+| `npx skills` / ZIP / manual copy | `lib/podcast_kg` inside the skill, zero install | installed on first `transcribe` |
+| Pi extension | the extension prepares a private venv | installed on first session |
+| `install-skill` from an existing CLI | that CLI, plus its `lib/` copy synced to the same version | installed on first `transcribe` |
 
 ```bash
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py            # idempotent; instant when ready
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py --check    # exit 1 if not ready
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py --json     # ready / cli / version / pinned / notes
-podcast-kg install-skill --target claude --verify                  # post-install check: files / pin / CLI
+python3 <skill>/bin/podcast-kg.py doctor          # preferred entry point; installs deps if needed
+python3 <skill>/bin/bootstrap.py --check          # deps/venv check only; exit 1 when not ready
+python3 <skill>/bin/bootstrap.py --json           # ready / vendored / deps / deps_ready / cli / notes
+python3 <skill>/bin/bootstrap.py --models small   # install deps + prefetch weights
 ```
 
-- **Where**: `$PODCAST_KG_HOME` (Windows `%LOCALAPPDATA%\podcast-kg`, macOS `~/Library/Application Support/podcast-kg`, Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`), always inside a private venv — system Python is untouched. Shims go to `$PODCAST_KG_HOME/bin` (and `~/.local/bin` when it exists).
-- **Which version**: `runtime.json` in the skill folder records the CLI version that installed it (`install-skill` writes it), and bootstrap installs `podcast-kg[all]==<that version>`. Sources, in order: local checkout → PyPI → git. If PyPI doesn't have that version yet, it falls back to git (git required) — so a hand-copied skill can still bootstrap itself.
-- **Works without Python**: prefers `uv`; `uv venv --python 3.12` downloads an interpreter when the host has none. If neither uv nor Python is available it prints the uv install command.
-- **Size and network**: `[all]` needs network once (faster-whisper + ctranslate2, hundreds of MB); whisper weights download on the first `transcribe`. Use `--extras none` if you only need `render` / `verify` (pure stdlib, offline).
-- **Fails loudly**: bootstrap exits 0/1 and `--json` puts the real error tail in `notes`. Env vars: `PODCAST_KG_HOME` (install location), `PODCAST_KG_BIN` (use an existing executable).
+- **Vendored CLI**: `lib/podcast_kg`, version pinned by `runtime.json`; `render/verify/ingest/i18n/models`
+  never touch the network or install anything. `install-skill` refreshes `lib/` to the installing CLI's
+  version so the skill and CLI never drift (`scripts/sync_skill_lib.py --check` guards it in CI).
+- **Deps only**: `deps` in `runtime.json` (`faster-whisper` + `av<19`) are installed into
+  `$PODCAST_KG_HOME/venv` on the first `transcribe` or `models fetch`; `bin/podcast-kg.py` switches to
+  that venv's Python automatically.
+- **Where**: `$PODCAST_KG_HOME` (Windows `%LOCALAPPDATA%\podcast-kg`, macOS `~/Library/Application Support/podcast-kg`,
+  Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`); only a private venv and `bin/` shims are written
+  (plus `~/.local/bin` when present).
+- **Works without Python**: prefers `uv`; `uv venv --python 3.12` downloads an interpreter when the host
+  has none. Without uv it prints the install command.
+- **Size and network**: the deps are hundreds of MB on first install; `render/verify/i18n/ingest` are fully
+  offline; whisper weights are separate (below).
+- **Fails loudly**: exit codes 0/1, real error tails in `--json` `notes`; `PODCAST_KG_BIN` overrides the CLI.
 
 ### Why whisper weights are not bundled
 
-`small` is 486 MB, `medium` 1.5 GB, `large-v3` 3.1 GB; PyPI caps files at 100 MB and git is the wrong place for binaries — and skill copies (`npx skills add`, plugin marketplaces) would drag every byte along. What is bundled is the ability to **use local weights**:
+`small` is 486 MB, `medium` 1.5 GB, `large-v3` 3.1 GB; marketplace ZIPs cap at 50 MB, git is the wrong place for binaries — and skill copies (`npx skills add`, plugin marketplaces) would drag every byte along. What is bundled is the ability to **use local weights**:
 
 | Approach | Command | When |
 | --- | --- | --- |
@@ -281,7 +255,7 @@ Agensi (and most skill marketplaces) accepts **one ZIP**: a single top folder wi
 deterministic packager (same tree → same SHA-256):
 
 ```bash
-python scripts/package_skill.py           # → dist/podcast-knowledge-graph-0.1.0.zip
+python scripts/package_skill.py           # → dist/podcast-knowledge-graph-<version>.zip
 python scripts/package_skill.py --check   # validate only
 python scripts/package_skill.py --json    # manifest / size / chars / sha256
 ```
@@ -300,15 +274,16 @@ podcast-knowledge-graph/
 └── runtime.json                version pin (bootstrap prefers it)
 ```
 
-It does **not** include the CLI source, whisper weights, caches or a virtualenv:
-on first use the buyer's agent runs `bin/bootstrap.py`, which installs `podcast-kg`
-into a private venv (PyPI first, git fallback until a release is on PyPI). The script
-also works when copied alone to a temp file — the version pin is embedded in
-`bootstrap.py`, with `runtime.json` as an override.
+The ZIP is the **complete skill including the CLI** (33 files, ~600 KB). It does **not**
+include whisper weights, caches or a virtualenv: `render/verify/ingest/i18n/models` work offline
+straight away, and the first `transcribe` installs only the two dependencies
+(`faster-whisper`, `av`) into a private venv. `lib/podcast_kg` is kept identical to
+`src/podcast_kg` by `scripts/sync_skill_lib.py` (CI-checked), so the skill never depends on a
+separately published PyPI package.
 
 The packager enforces Agensi's rules: ≤50 MB, ≤1000 files, ≤6M characters; rejects
 exe/dll/so and friends; strips `.git`, `__pycache__`, `.DS_Store`, `node_modules`,
-`site-packages` and virtualenvs. One advisory: `bin/bootstrap.py` is 22.9 KB, slightly
+`site-packages` and virtualenvs. One advisory: `bin/bootstrap.py` is ~28 KB, slightly
 over their "keep scripts under 20 KB for review" guideline (not a hard limit).
 
 ### Publishing the ZIP through git
@@ -322,9 +297,9 @@ over their "keep scripts under 20 KB for review" guideline (not a hard limit).
 Upload by hand instead:
 
 ```bash
-gh release create v0.1.0 dist/podcast-knowledge-graph-0.1.0.zip --generate-notes
+gh release create v0.1.0 dist/podcast-knowledge-graph-<version>.zip --generate-notes
 # or add the asset to an existing release:
-gh release upload v0.1.0 dist/podcast-knowledge-graph-0.1.0.zip --clobber
+gh release upload v0.1.0 dist/podcast-knowledge-graph-<version>.zip --clobber
 ```
 
 On Agensi: upload the zip → set a price → 8-point automated security scan + AI intent
@@ -333,7 +308,7 @@ current version on demand.
 
 ### Versioning and releases (merge → tag → release)
 
-The version lives in four places (PyPI metadata / `--version` / the skill's `runtime.json` / the
+The version lives in four places (package metadata / `--version` / the skill's `runtime.json` / the
 pin embedded in bootstrap). One script keeps them in sync:
 
 ```bash
@@ -365,38 +340,6 @@ The only real rule: **bump the version in the PR**, otherwise there is no new ta
 Maintenance / Other. When the PR title uses a Conventional Commits prefix (`feat:` / `fix:` / `docs:` /
 `chore:` …, including `feat(api)!:`), `pr-label.yml` adds the matching label automatically; add the
 `skip-changelog` label to hide a PR from the notes.
-
-### Why publish to PyPI (and what breaks without it)
-
-`podcast-kg` is not a private name in this repo — it is a **distribution name on PyPI**. Without a
-publish, every “install by name” path fails:
-
-| Without PyPI | Impact |
-| --- | --- |
-| `uv tool install "podcast-kg[all]"` / `pip install` / `pipx` / `uvx` | all fail with `No solution found`; docs must point at git or a local path |
-| the skill's `bin/bootstrap.py` | every run queries PyPI (404) then falls back to git: needs `git` and GitHub access; CI/containers often have pip but no git, and GitHub is unreliable from some networks (PyPI has mirrors) |
-| version pinning and audit | no `podcast-kg==0.1.0`, no `pip download` wheelhouse, no dependency scanners / SBOM |
-| marketplace review | “runtime comes from PyPI” is much easier to explain than “git install” |
-
-**The cost is not “it cannot be installed”**: skill files, the stdlib-only commands
-(`render/verify/ingest/i18n`), and git/local installs all keep working. The cost lands on
-**a first-time user installing the CLI** and on **environments without git or with weak GitHub access**.
-
-### Publishing (configure once, then every tag)
-
-1. One-time: PyPI → *Publishing* → *Add a pending publisher*:
-   project `podcast-kg`, owner `meeting90`, repository `podcast-knowledge-graph`, workflow `pypi.yml`.
-   The OIDC workflow is already in the repo (`.github/workflows/pypi.yml`) — **no API token needed**.
-2. Trigger: `gh workflow run pypi.yml -f tag=v0.1.0`, or publish a GitHub Release.
-3. Local manual publish (needs a token): `uv build && uv publish` (or `twine upload dist/*`).
-4. Verify: `pip index versions podcast-kg`, `uv tool install "podcast-kg[all]"`.
-
-The version lives in four places (`pyproject.toml`, `__init__.py`, `runtime.json`, `PIN_VERSION` in
-`bootstrap.py`); use `python scripts/bump_version.py patch|minor|major`. `pypi.yml` refuses to publish
-when the tag and the package version disagree.
-
-> PyPI versions are immutable: a bad release can only be yanked and followed by a new version.
-> Do a `uv build` + `twine check` first (both currently pass).
 
 ## Layout
 

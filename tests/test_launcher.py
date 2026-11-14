@@ -52,8 +52,9 @@ class LauncherTest(unittest.TestCase):
                 "--help",
                 env={"PODCAST_KG_HOME": str(home), "PODCAST_KG_BIN": ""},
             )
-            self.assertEqual(proc.returncode, 0)
-            self.assertIn("not installed", proc.stderr)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            # the CLI ships with the skill, so help works without any install
+            self.assertIn("usage: podcast-kg", proc.stdout)
             self.assertFalse((home / "venv").exists())
 
     def test_without_runtime_it_reports_instead_of_hanging(self) -> None:

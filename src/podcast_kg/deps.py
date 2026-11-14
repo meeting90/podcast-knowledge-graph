@@ -72,6 +72,16 @@ def ensure(module: str, spec: str | None = None) -> None:
 
     spec = spec or _HINT.get(module, module)
 
+    if os.environ.get("PODCAST_KG_VENDORED"):
+        nl = chr(10)
+        raise SystemExit(
+            f"缺少依赖 {spec}。当前运行的是 skill 内置的 CLI，不会往系统 Python 里装包。"
+            + nl
+            + "  请用 skill 的启动器（会自动装到私有 venv）：python3 <skill>/bin/podcast-kg.py …"
+            + nl
+            + "  或显式安装：python3 <skill>/bin/bootstrap.py"
+        )
+
     if os.environ.get("PODCAST_KG_NO_AUTO_INSTALL"):
         raise SystemExit(f"缺少依赖 {spec}。请运行：{manual_hint(spec)}")
 

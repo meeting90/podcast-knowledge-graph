@@ -146,7 +146,12 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             report = json.loads(proc.stdout)
             self.assertFalse(report["ready"])
-            self.assertIn(report["action"], {"install-uv", "install-pip", "install-blocked"})
+            self.assertIn(
+                report["action"],
+                {"install-deps", "install-uv", "install-pip", "install-blocked"},
+            )
+            self.assertTrue(report["vendored"])
+            self.assertTrue(report["deps"])
             self.assertIn("podcast-kg", report["pinned"])
             self.assertFalse(home.exists(), "plan must not create anything")
 

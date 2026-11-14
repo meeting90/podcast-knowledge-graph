@@ -36,6 +36,10 @@ def skill_dir() -> Path | None:
     fallback = Path(__file__).resolve().parent.parent.parent / "skills" / SKILL_NAME
     if (fallback / "SKILL.md").is_file():
         return fallback
+    # vendored: <skill>/lib/podcast_kg/runtime.py -> <skill>
+    vendored = Path(__file__).resolve().parent.parent.parent
+    if (vendored / "SKILL.md").is_file() and (vendored / "lib" / "podcast_kg").is_dir():
+        return vendored
     return None
 
 
@@ -54,12 +58,13 @@ def pin_payload() -> dict:
         "package": "podcast-kg",
         "version": __version__,
         "extras": ["all"],
+        "deps": ["faster-whisper>=1.0.0", "av>=11,<19"],
         "requires_python": ">=3.10",
         "entry": "podcast-kg",
         "bootstrap": BOOTSTRAP.as_posix(),
         "install_from_git": "git+https://github.com/meeting90/podcast-knowledge-graph",
         "git_rev": "",
-        "note": "装 skill ≠ 装运行时。CLI 不可用时先跑 bin/bootstrap.py（幂等，只装到私有 venv）。",
+        "note": "CLI 随 skill 分发（lib/）。bin/bootstrap.py 只把转写依赖装进私有 venv。",
     }
 
 

@@ -32,29 +32,35 @@
 
 ## 安装
 
-### 方式 A：用 skills.sh 的 `npx skills` 安装（推荐，任意 agent）
+skill **自带 CLI**（`skills/podcast-knowledge-graph/lib/podcast_kg`）：装上就能用
+`render / verify / ingest / i18n / models / install-skill`，这些命令**纯标准库、离线可用**。
+只有 `transcribe` 需要一次性安装 `faster-whisper`（数百 MB，自动装进私有 venv）。
+**不需要单独发布或安装 `podcast-kg` Python 包。**
 
-仓库本来就是它要的结构（`skills/<name>/SKILL.md`），不用额外打包：
+### 方式 A：npx skills（推荐，任意 agent）
+
+仓库就是它要的结构（`skills/<name>/SKILL.md`）：
 
 ```bash
 npx skills add meeting90/podcast-knowledge-graph -l                    # 先看仓库里有哪些 skill
-npx skills add meeting90/podcast-knowledge-graph --agent claude-code -y     # 装到 Claude（默认符号链接）
+npx skills add meeting90/podcast-knowledge-graph --agent claude-code -y     # 装到 Claude
 npx skills add meeting90/podcast-knowledge-graph --agent '*'          # 所有 agent（含未安装的）
 ```
 
-`--agent` 取 skills.sh 支持的 agent id（`claude-code`、`codex`、`cursor`、`gemini-cli`、`opencode`、`pi`、`github-copilot` …），
-`--agent '*'` 装到所有 agent（`--all` 等价于 `--skill '*' --agent '*' -y`）；不在列表里的 agent 用 **`--agent universal`**（落到 `.agents/skills/`，
-和本仓库 `install-skill --target agents` 是同一个位置）。`npx skills add … -l` 可以先看仓库里有哪些 skill。
+`--agent` 取 skills.sh 支持的 id（`claude-code`、`codex`、`cursor`、`gemini-cli`、`opencode`、`pi`、
+`github-copilot` …）；`--agent '*'` 装到全部（`--all` 是其加上 `--skill '*'` 的简写）；
+不在列表里的 agent 用 **`--agent universal`**（落到 `.agents/skills/`，和本仓库
+`install-skill --target agents` 同一位置）。
 
-`npx skills` 只把文件链接/复制进 agent 目录，**不会执行任何安装脚本**——Agent Skills 规范没有
-postinstall 钩子，也不会帮你预装 CLI。但**用户不需要手动跑 uv/pip**：装完后第一条命令走 skill 自带的启动器，
-它会先装运行时再执行（机器上只要有 `uv` 或 Python ≥3.10；两者都没有时它会打印装 uv 的命令）：
+`npx skills` 只复制文件，不执行安装脚本；CLI 已经在 skill 里，所以装完直接：
 
 ```bash
 python3 <skills-dir>/podcast-knowledge-graph/bin/podcast-kg.py doctor
 ```
 
-### 方式 B：作为 Pi extension 安装（只有 Pi 需要）
+第一次 `transcribe` 时它才会把 `faster-whisper` 装进 `$PODCAST_KG_HOME/venv`，之后离线可用。
+
+### 方式 B：作为 Pi extension 安装（只有 Pi）
 
 ```bash
 pi install git:github.com/meeting90/podcast-knowledge-graph
@@ -63,18 +69,10 @@ pi install git:github.com/meeting90/podcast-knowledge-graph
 
 Pi 会加载两个资源：
 
-
-| 资源                                | 作用                                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `.pi/extensions/podcast-kg.ts`    | 首次会话时自动创建私有 venv 并装齐依赖（`podcast-kg[all]`），把 `podcast-kg` 放进 PATH，追加 system prompt，并注册 `/podcast-kg` 命令 |
-| `skills/podcast-knowledge-graph/` | skill 本体：`SKILL.md`、`sop/SOP.md`、`examples/`                                                           |
-
-
-依赖是**随扩展装好**的：第一次启动 Pi 时会一次性装到 `~/.pi/agent/cache/podcast-kg/venv`（含 `faster-whisper`），之后启动不再重复。检查：
-
-```text
-/podcast-kg doctor        # 或在 bash 里 podcast-kg doctor
-```
+| 资源 | 作用 |
+| --- | --- |
+| `.pi/extensions/podcast-kg.ts` | 首次会话时自动准备 venv 依赖、把 `podcast-kg` 放进 PATH、追加 system prompt、注册 `/podcast-kg` |
+| `skills/podcast-knowledge-graph/` | skill 本体（含内置 CLI `lib/`） |
 
 本仓库自己也是可直接跑的 Pi 项目：
 
@@ -82,103 +80,62 @@ Pi 会加载两个资源：
 cd podcast-knowledge-graph && pi        # 首次会问是否信任（要加载 .pi/extensions）
 ```
 
-### 方式 C：只装 CLI（想预装运行时 / 离线时）
-
-> 走 `npx skills` 的话**可以跳过这一节**：skill 第一次被调用时会自己装运行时。
-> 这里的 `install-skill` 与 npx 的区别是：它除了复制 skill，还会在该 agent 的指令文件里写一段指针块
-> （`AGENTS.md` / `CLAUDE.md` / …），对不扫描 skills 目录的 agent 更稳。
-
-`uv` / `pip` 并不认识本仓库：它们把 `podcast-kg` 当成 **PyPI 上的发行名**（等价写法 `podcast_kg`），
-去默认索引 `https://pypi.org/simple` 查；`[all]` 是包元数据里的 **extra**（`Provides-Extra: all`），
-不是另一个包。名字查不到就会报 `No solution found … no versions of podcast-kg[all]`。
-`@ git+…` 或本地路径是 **direct reference**，绕过索引，包名只用来校验构建出来的项目名。
-装好后 `uv tool list` 能看到，卸载用 `uv tool uninstall podcast-kg`。
-
-
+### 方式 C：ZIP / 手工安装，或让 skill 去装别的 agent
 
 ```bash
-# 现在（PyPI 尚未发布）：从 git 或本地源码装，direct reference 不需要索引
-uv tool install "podcast-kg[all] @ git+https://github.com/meeting90/podcast-knowledge-graph"
-# 在仓库根目录也可以：uv tool install ".[all]"
+# 拿到 release 里的 zip（或本地构建的 dist/*.zip）后直接解压到 agent 的 skills 目录
+unzip podcast-knowledge-graph-<version>.zip -d ~/.claude/skills/
+python3 ~/.claude/skills/podcast-knowledge-graph/bin/podcast-kg.py doctor
 
-# PyPI 发布之后才能只写包名：
-# uv tool install "podcast-kg[all]"   # 或 pipx / pip install "podcast-kg[all]"
-podcast-kg doctor
-
-podcast-kg install-skill --list                    # 支持哪些 agent、各自装到哪
-podcast-kg install-skill --target pi               # ~/.pi/agent/skills
-podcast-kg install-skill --target claude           # ~/.claude/skills
-podcast-kg install-skill --target codex            # ~/.codex/skills + AGENTS.md
-podcast-kg install-skill --target all --dry-run    # 先看要写哪些文件
+# skill 已经能跑之后，也可以让它把 skill 写进别的 agent（顺带写指针块）
+python3 <skills-dir>/podcast-knowledge-graph/bin/podcast-kg.py install-skill --target codex
 ```
 
+| 目标 | 用户级 skills | 项目级 skills（`--scope project`） | 指针文件 |
+| --- | --- | --- | --- |
+| `pi` | `~/.pi/agent/skills/` | `.pi/skills/` | `APPEND_SYSTEM.md`（Pi 专用，`.pi/` 下） |
+| `claude` | `~/.claude/skills/` | `.claude/skills/` | `CLAUDE.md` |
+| `codex` | `~/.codex/skills/` | `.codex/skills/` | `AGENTS.md` |
+| `cursor` | `~/.cursor/skills/` | `.cursor/skills/` | `AGENTS.md` |
+| `gemini` | `~/.gemini/skills/` | `.gemini/skills/` | `GEMINI.md` |
+| `opencode` | `~/.config/opencode/skills/` | `.opencode/skills/` | `AGENTS.md` |
+| `copilot` | —（无用户级） | `.github/skills/` | `.github/copilot-instructions.md` |
+| `agents` | `~/.agents/skills/` | `.agents/skills/` | `AGENTS.md` |
 
-| 目标         | 用户级 skills                   | 项目级 skills（`--scope project`） | 指针文件                              |
-| ---------- | ---------------------------- | ----------------------------- | --------------------------------- |
-| `pi`       | `~/.pi/agent/skills/`        | `.pi/skills/`                 | `APPEND_SYSTEM.md`（Pi 专用，`.pi/` 下） |
-| `claude`   | `~/.claude/skills/`          | `.claude/skills/`             | `CLAUDE.md`                       |
-| `codex`    | `~/.codex/skills/`           | `.codex/skills/`              | `AGENTS.md`                       |
-| `cursor`   | `~/.cursor/skills/`          | `.cursor/skills/`             | `AGENTS.md`                       |
-| `gemini`   | `~/.gemini/skills/`          | `.gemini/skills/`             | `GEMINI.md`                       |
-| `opencode` | `~/.config/opencode/skills/` | `.opencode/skills/`           | `AGENTS.md`                       |
-| `copilot`  | —（无用户级）                      | `.github/skills/`             | `.github/copilot-instructions.md` |
-| `agents`   | `~/.agents/skills/`          | `.agents/skills/`             | `AGENTS.md`                       |
+不在表里的 agent：`install-skill --skills-dir DIR --instructions AGENTS.md`，或直接解压 zip。
+指针块文字来自 skill 里的 `pointer.md`；Pi 自己的 prompt 段在 `.pi/APPEND_SYSTEM.md`，两者互不复用。
 
+> 三种方式选一：Pi extension 与 `npx skills add --agent pi` 都会提供 skill，重复安装会出现同名 skill
+> （Pi 保留先发现的并告警）。
 
-不在表里的 agent 用两参数通用形态：
+## 运行时：skill 自带 CLI
+
+| 安装方式 | CLI 从哪来 | 转写依赖 |
+| --- | --- | --- |
+| `npx skills` / ZIP / 手工拷贝 | skill 内的 `lib/podcast_kg`，零安装 | 首次 `transcribe` 自动装 |
+| Pi extension | extension 准备私有 venv | 首次会话装齐 |
+| 自带 CLI 的 `install-skill` | 用现有 CLI，并把 `lib/` 同步成该版本 | 首次 `transcribe` 自动装 |
 
 ```bash
-podcast-kg install-skill --skills-dir .my-agent/skills --instructions AGENTS.md
-podcast-kg install-skill --skills-dir .my-agent/skills --no-pointer   # 只要文件
+python3 <skill>/bin/podcast-kg.py doctor          # 首选入口：CLI 自带，缺依赖会自动装
+python3 <skill>/bin/bootstrap.py --check          # 只检查依赖/venv；未就绪退出码 1
+python3 <skill>/bin/bootstrap.py --json           # ready / vendored / deps / deps_ready / cli / notes
+python3 <skill>/bin/bootstrap.py --models small   # 装依赖 + 预取权重
 ```
 
-指针块的文字来自 skill 里的 `pointer.md`（agent 无关）；Pi 自己的 system prompt 段在 `.pi/APPEND_SYSTEM.md`，两者互不复用。
-
-每次安装都会在该 agent 的指令文件里维护一段 `<!-- podcast-kg:start --> … <!-- podcast-kg:end -->` 的块
-（指向已安装的 `SKILL.md`、`runtime.json` 与 `bin/bootstrap.py`），不动文件里的其他内容；
-`podcast-kg uninstall-skill --target <agent>` 只移除自己的那部分（运行时 venv 保留，
-要一并清掉就 `rm -rf "$PODCAST_KG_HOME"`）。
-
-> 三种方式选一：Pi extension 与 `npx skills add --agent pi` 都会提供 skill，重复安装会出现同名 skill（Pi 保留先发现的并告警）。
-> 装完在 Pi 里 `/reload`，其他 agent 直接新开会话即可。
-
-> `podcast-kg setup` / `unsetup` 保留为旧写法，等价于 `install-skill --target pi` / `uninstall-skill --target pi`。
-
-## 运行时保证：装完为什么能直接用
-
-skill 只是文件，真正干活的是 `podcast-kg` CLI。安装路径不同，运行时从哪来也不同：
-
-
-| 安装方式                                              | 运行时由谁准备                                                    | 装完能不能用 |
-| ------------------------------------------------- | ---------------------------------------------------------- | ------ |
-| Pi extension                                      | extension 首次会话自动建私有 venv（含 `faster-whisper`） | 能      |
-| `podcast-kg install-skill`                        | CLI 已在；`transcribe` / `ingest` 首次调用自动装依赖                   | 能      |
-| 文件被拷进来（marketplace / `npx skills add` / 手工 clone） | 用 `bin/podcast-kg.py`：首次调用自动装运行时 | 第一条命令就装好 |
-
-
-```bash
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py            # 幂等；已就绪就秒回
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py --check    # 未就绪退出码 1
-python3 skills/podcast-knowledge-graph/bin/bootstrap.py --json     # ready / cli / version / pinned / notes
-podcast-kg install-skill --target claude --verify                  # 装完自检：文件 / pin / CLI
-```
-
+- **内置 CLI**：`lib/podcast_kg`，版本由 `runtime.json` 的 `version` 固定；`render/verify/ingest/i18n/models`
+  不联网、不装任何包。`install-skill` 会把 `lib/` 同步成当前 CLI 的版本，避免 skill 与 CLI 漂移。
+- **只装依赖**：`runtime.json` 的 `deps`（`faster-whisper` + `av<19`）在第一次 `transcribe`
+  或 `models fetch` 时装入 `$PODCAST_KG_HOME/venv`；`bin/podcast-kg.py` 会自动切到该 venv 的 Python 运行。
 - **装到哪**：`$PODCAST_KG_HOME`（Windows `%LOCALAPPDATA%\podcast-kg`，macOS `~/Library/Application Support/podcast-kg`，
-Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`），只在私有 venv 里，不动系统 Python；
-shim 写 `$PODCAST_KG_HOME/bin`（存在时也写 `~/.local/bin`）。
-- **装什么版本**：skill 目录里的 `runtime.json` 记录安装它的 CLI 版本（`install-skill` 写入），
-bootstrap 就装 `podcast-kg[all]==<该版本>`；来源依次是「本地源码 → PyPI → git」，
-PyPI 还没发布这个版本时自动从 git 装（需已装 git），所以 skill 被单独拷走也能自举。
-- **没有 Python 也能起来**：优先用 `uv`，缺解释器时 `uv venv --python 3.12` 会自动下载；
-连 uv 都没有则提示先装 uv（`curl -LsSf https://astral.sh/uv/install.sh | sh`）。
-- **体积与网络**：`[all]` 首次安装要联网（faster-whisper + ctranslate2，数百 MB），
-whisper 模型在首次 `transcribe` 时下载；只要 `render` / `verify` 就加 `--extras none`（纯标准库，离线可用）。
-- **失败不失联**：bootstrap 退出码 0/1，`--json` 的 `notes` 带真实错误尾部；
-两类环境变量 `PODCAST_KG_HOME`（安装位置）、`PODCAST_KG_BIN`（指定现成可执行文件）。
+  Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`），只写私有 venv + `bin/` shim（存在时也写 `~/.local/bin`）。
+- **没有 Python 也能起来**：优先用 `uv`，缺解释器时 `uv venv --python 3.12` 自动下载；连 uv 都没有会提示安装。
+- **体积与网络**：依赖首次安装数百 MB；`render/verify/i18n/ingest` 完全离线；whisper 权重另算（见下）。
+- **失败不失联**：退出码 0/1，`--json` 的 `notes` 带真实错误尾部；`PODCAST_KG_BIN` 可指定现成 CLI。
 
 ### 模型权重（whisper）为什么不内置
 
-`small` 486 MB、`medium` 1.5 GB、`large-v3` 3.1 GB；PyPI 单文件上限 100 MB，git 仓库不适合放二进制，
+`small` 486 MB、`medium` 1.5 GB、`large-v3` 3.1 GB；Agensi zip 上限 50 MB，git 仓库也不适合放二进制，
 skill 被 `npx skills add` / 插件市场复制时还会被整包搬走。所以内置的是**「认得本地权重」的能力**：
 
 | 做法 | 命令 | 适用 |
@@ -292,32 +249,34 @@ Agensi（以及大多数技能市场）只收**一个 ZIP**：解压后一个顶
 脚本与参考资料放子目录。本仓库自带打包器，输出**确定性** zip（同一棵树 → 同一个 SHA-256）：
 
 ```bash
-python scripts/package_skill.py           # → dist/podcast-knowledge-graph-0.1.0.zip
+python scripts/package_skill.py           # → dist/podcast-knowledge-graph-<version>.zip
 python scripts/package_skill.py --check   # 只校验，不写文件
 python scripts/package_skill.py --json    # 文件清单 / 体积 / 字符数 / sha256
 ```
 
-ZIP 里**只有 skill 本体**（14 个文件、约 155 KB、12.6 万字符）：
+ZIP 里是**完整的 skill，包括内置 CLI**（33 个文件、约 600 KB）：
 
 ```
 podcast-knowledge-graph/
 ├── SKILL.md / SKILL.en.md      触发条件、执行步骤、质量闸门（中/英）
 ├── sop/SOP.md / SOP.en.md      抽取规范（中/英）
 ├── examples/                   完整示例卡（JSON + Markdown）
-├── bin/bootstrap.py            运行时自举（纯标准库；版本 pin 已内置）
+├── bin/podcast-kg.py           启动器：直接跑内置 CLI，缺依赖时自动装
+├── bin/bootstrap.py            只装依赖（faster-whisper + av）到私有 venv
 ├── bin/bootstrap / .cmd        可选启动器
-├── bin/README.md / .en.md      自举行为说明
+├── lib/podcast_kg/             内置 CLI（与 src/ 同步，含 HTML 模板/样式）
 ├── pointer.md                  写进 AGENTS.md / CLAUDE.md 的通用说明块
-└── runtime.json                版本 pin（bootstrap 优先读它）
+└── runtime.json                版本 + 依赖清单
 ```
 
-**不含** CLI 源码、whisper 权重、缓存或虚拟环境：买家第一次用时由 `bin/bootstrap.py`
-把 `podcast-kg` 装进私有 venv（PyPI 优先，未发布则回退 git）。脚本可以单文件拷走运行——
-版本 pin 已写进 `bootstrap.py` 常量，`runtime.json` 只作覆盖。
+**不含** whisper 权重、缓存或虚拟环境：`render/verify/ingest/i18n/models` 装上即可离线使用；
+只有 `transcribe` 首次运行时由 `bin/bootstrap.py` 把两个依赖装进私有 venv。
+`lib/` 与 `src/podcast_kg` 由 `scripts/sync_skill_lib.py` 保持同步（CI 校验），
+所以 skill 不需要依赖 PyPI 上单独发布的包。
 
 打包器已按 Agensi 规则检查：≤50 MB、≤1000 文件、≤600 万字符；拒绝 exe/dll/so 等可执行文件；
 自动剔除 `.git`、`__pycache__`、`.DS_Store`、`node_modules`、`site-packages`、venv。
-唯一提示：`bin/bootstrap.py` 22.9 KB，略超其「脚本 <20 KB 便于人工审阅」的建议值（非硬限制）。
+唯一提示：`bin/bootstrap.py` ~28 KB，略超其「脚本 <20 KB 便于人工审阅」的建议值（非硬限制）。
 
 ### 用 git 发布 ZIP
 
@@ -330,9 +289,9 @@ podcast-knowledge-graph/
 手动上传到 Release：
 
 ```bash
-gh release create v0.1.0 dist/podcast-knowledge-graph-0.1.0.zip --generate-notes
+gh release create v0.1.0 dist/podcast-knowledge-graph-<version>.zip --generate-notes
 # 或先建 release，再补资产：
-gh release upload v0.1.0 dist/podcast-knowledge-graph-0.1.0.zip --clobber
+gh release upload v0.1.0 dist/podcast-knowledge-graph-<version>.zip --clobber
 ```
 
 Agensi 侧流程：上传 zip → 填定价 → 8 项自动安全扫描 + AI 意图审查 + 人工复核 → 上线；
@@ -340,7 +299,7 @@ Agensi 侧流程：上传 zip → 填定价 → 8 项自动安全扫描 + AI 意
 
 ### 版本管理与发布（merge 即 tag + release）
 
-版本写在 4 处（PyPI 元数据 / `--version` / skill 的 `runtime.json` / bootstrap 内置 pin），用脚本同步：
+版本写在 4 处（包元数据 / `--version` / skill 的 `runtime.json` / bootstrap 内置 pin），用脚本同步：
 
 ```bash
 python scripts/bump_version.py --check        # CI 每次都会跑
@@ -369,34 +328,6 @@ gh release create v0.2.0 dist/podcast-knowledge-graph-0.2.0.zip --generate-notes
 **Release notes 分组**：`.github/release.yml` 把变更分成 Features / Fixes / Documentation / Maintenance / Other；
 PR 标题用 Conventional Commits 前缀（`feat:` / `fix:` / `docs:` / `chore:` …，支持 `feat(api)!:`）时，
 `pr-label.yml` 会自动打对应标签；不想出现在 notes 里就给 PR 加 `skip-changelog` 标签。
-
-### 为什么发 PyPI（不发会怎样）
-
-`podcast-kg` 不是本仓库私有的名字，它是 **PyPI 上的发行名**。不发，所有“按名字装”的路径都会断：
-
-| 不发 PyPI | 影响 |
-| --- | --- |
-| `uv tool install "podcast-kg[all]"` / `pip install` / `pipx` / `uvx` | 全部 `No solution found`，文档只能写 git / 本地路径 |
-| skill 的 `bin/bootstrap.py` | 每次都先查 PyPI（404）再回退 git：要求机器有 `git` 且能连 GitHub；CI/容器常常只有 pip，国内网络 GitHub 也不稳（PyPI 有镜像） |
-| 版本锁定与审计 | 不能 `podcast-kg==0.1.0`、不能 `pip download` 做离线 wheelhouse、依赖扫描/SBOM 认的是 PyPI |
-| Marketplace 审核 | “运行时从 PyPI 装”比“从 git 装”更容易解释与复核 |
-
-**不发的代价不是“装不上”**：skill 文件、`render/verify/ingest/i18n` 这些纯标准库命令、以及 git/本地安装都照常；
-代价集中在**普通用户第一次装 CLI** 和**无 git / 弱网环境**。
-
-### 发布步骤（一次配置，之后随 tag 自动）
-
-1. 首次：PyPI → *Publishing* → *Add a pending publisher*：
-   project `podcast-kg`、owner `meeting90`、repository `podcast-knowledge-graph`、workflow `pypi.yml`。
-   仓库里已备好 OIDC 工作流（`.github/workflows/pypi.yml`），**不需要 API token**。
-2. 触发：`gh workflow run pypi.yml -f tag=v0.1.0`；或发布 GitHub Release 时自动触发。
-3. 想本地手动发（需要 token）：`uv build && uv publish`（或 `twine upload dist/*`）。
-4. 验证：`pip index versions podcast-kg`、`uv tool install "podcast-kg[all]"`。
-
-版本号在 4 处（`pyproject.toml`、`__init__.py`、`runtime.json`、`bootstrap.py` 的 `PIN_VERSION`），
-用 `python scripts/bump_version.py patch|minor|major` 同步；`pypi.yml` 会先校验 tag 与版本一致。
-
-> PyPI 版本不可覆盖：发错了只能 yank 再发下一个版本。先在 TestPyPI 或 `uv build` + `twine check` 过一遍（当前两者均通过）。
 
 ## 目录结构
 
