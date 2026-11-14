@@ -228,12 +228,7 @@ def _pointer_doc() -> str:
     if packaged.is_file():
         raw = packaged.read_text(encoding="utf-8")
     else:
-        raw = (
-            Path(__file__).resolve().parent.parent.parent
-            / "skills"
-            / SKILL_NAME
-            / "pointer.md"
-        ).read_text(encoding="utf-8")
+        raw = (Path(str(_skill_resource())) / "pointer.md").read_text(encoding="utf-8")
     lines = [
         line
         for line in raw.replace("\r\n", "\n").split("\n")

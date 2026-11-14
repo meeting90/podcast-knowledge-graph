@@ -7,7 +7,7 @@
 一个 **agent 无关的 skill + Python CLI**：同一份 skill 可以装进 Pi、Claude Code、Codex、Cursor、Gemini CLI、OpenCode、Copilot，或任何读 `AGENTS.md` 的 agent，把播客 / 长视频 / 深度访谈抽成**可溯源的知识卡**（JSON + Markdown），渲染成 [HERON](https://heronai.top) 同款的观点页（可折叠、点时间戳回链原声），或写入知识图谱。
 
 - **Agent Skills 目录**（`skills/podcast-knowledge-graph/`）：就是 `SKILL.md` + `sop/` + `examples/`，不依赖任何 agent 私有格式——`podcast-kg install-skill` 负责复制到各家的 skills 目录；
-- **Python 包**（`src/podcast_kg`）：真正干活的 CLI——转写、校验、渲染、入库，以及安装 skill；
+- **Python 包**（`skills/podcast-knowledge-graph/lib/podcast_kg`）：真正干活的 CLI——转写、校验、渲染、入库，以及安装 skill；
 - **Pi extension**（`.pi/extensions/podcast-kg.ts`，可选）：薄桥接层，负责准备 Python 环境、把 `podcast-kg` 放进 PATH、追加 system prompt、注册 skill。只有 Pi 需要它。
 
 每条观点（claim）都带**音频时间戳区间**，可以直接回链到原节目——这是它和普通"AI 摘要"最大的区别。
@@ -211,7 +211,7 @@ podcast-kg ingest .outputs/ep42.json   # → .outputs/ep42_graph.json
 > `ingest` 从 0.1.0 起不再依赖 semantica。它的 `merge_entities=True` 会按名字相似度误合并：
 > 实测把「北京大学」并进「北京师范大学」（`minsky` 并进 `zuckerberg`，两条不同 claim `c33`/`c43` 并成一个 id），
 > 每条脏数据都长得完全合法；而它宣称的 PROV-O 溯源只存在进程内存里、从未落盘。
-> 现在的实现（`src/podcast_kg/ingest_graph.py`）只按 id 去重，边做端点/自指校验，
+> 现在的实现（`skills/podcast-knowledge-graph/lib/podcast_kg/ingest_graph.py`）只按 id 去重，边做端点/自指校验，
 > 溯源直接写进 `*_graph.json` 的 `provenance[]`。
 
 
@@ -240,7 +240,7 @@ podcast-kg setup --agent-dir /tmp/pk-agent --dry-run
 podcast-kg setup --agent-dir /tmp/pk-agent
 
 uv build                                 # wheel 会把 skills/ 映射成 podcast_kg/skill
-PYTHONPATH=src python -m unittest discover -s tests -v   # skill 安装器测试
+PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 ```
 
 ## 打包与发布 skill（Agensi / ZIP）
@@ -264,15 +264,15 @@ podcast-knowledge-graph/
 ├── bin/podcast-kg.py           启动器：直接跑内置 CLI，缺依赖时自动装
 ├── bin/bootstrap.py            只装依赖（faster-whisper + av）到私有 venv
 ├── bin/bootstrap / .cmd        可选启动器
-├── lib/podcast_kg/             内置 CLI（与 src/ 同步，含 HTML 模板/样式）
+├── lib/podcast_kg/             内置 CLI（唯一源码，含 HTML 模板/样式）
 ├── pointer.md                  写进 AGENTS.md / CLAUDE.md 的通用说明块
 └── runtime.json                版本 + 依赖清单
 ```
 
 **不含** whisper 权重、缓存或虚拟环境：`render/verify/ingest/i18n/models` 装上即可离线使用；
 只有 `transcribe` 首次运行时由 `bin/bootstrap.py` 把两个依赖装进私有 venv。
-`lib/` 与 `src/podcast_kg` 由 `scripts/sync_skill_lib.py` 保持同步（CI 校验），
-所以 skill 不需要依赖 PyPI 上单独发布的包。
+`lib/podcast_kg` 就是 Python 包的唯一源码（`pyproject.toml` 的打包路径指向它），
+所以既没有第二份副本，也不需要 PyPI 上单独发布的包。
 
 打包器已按 Agensi 规则检查：≤50 MB、≤1000 文件、≤600 万字符；拒绝 exe/dll/so 等可执行文件；
 自动剔除 `.git`、`__pycache__`、`.DS_Store`、`node_modules`、`site-packages`、venv。
@@ -334,32 +334,29 @@ PR 标题用 Conventional Commits 前缀（`feat:` / `fix:` / `docs:` / `chore:`
 ```
 podcast-knowledge-graph/
 ├── package.json                  # Pi 包清单：extension + skills
-├── pyproject.toml                # Python 包 podcast-kg：依赖、CLI 入口
+├── pyproject.toml                # Python 包 podcast-kg：打包路径指向 skill 的 lib/
 ├── skills/podcast-knowledge-graph/   # Agent Skills 目录（唯一来源，打包时映射进 wheel）
 │   ├── SKILL.md                  #   触发条件、执行步骤、质量闸门（中文；英文见 SKILL.en.md）
 │   ├── pointer.md                #   装到各家 AGENTS.md / CLAUDE.md 的通用说明块
-│   ├── runtime.json              #   运行时 pin：bootstrap 要装的 podcast-kg 版本
-│   ├── bin/bootstrap.py          #   纯标准库自愈脚本：私有 venv + PATH shim
+│   ├── runtime.json              #   版本 + 依赖清单
+│   ├── bin/podcast-kg.py         #   启动器：直接跑内置 CLI，缺依赖时自动装
+│   ├── bin/bootstrap.py          #   只装转写依赖：私有 venv + PATH shim
 │   ├── sop/SOP.md                #   抽取规范：schema、命名规则、关系类型、质检清单（英文见 SOP.en.md）
-│   └── examples/                 #   一张完整示例卡（JSON + Markdown）
+│   ├── examples/                 #   一张完整示例卡（JSON + Markdown）
+│   └── lib/podcast_kg/           #   CLI 唯一源码（Python 包本体）
+│       ├── cli.py                #     子命令实现
+│       ├── args.py               #     argparse：每个子命令的 --help（权威说明）
+│       ├── transcribe.py         #     faster-whisper 封装（段级时间戳、VAD、--words）
+│       ├── render_card.py        #     知识卡 JSON → HERON 同款 HTML
+│       ├── i18n.py               #     双语卡：结构检查、合并、骨架
+│       ├── models.py             #     whisper 权重解析 / 预取 / 校验
+│       ├── ingest_graph.py       #     可溯源图谱快照（纯标准库）
+│       ├── skill_install.py      #     装进任意 agent
+│       ├── runtime.py / deps.py  #     运行 pin / 依赖
+│       └── assets/heron.css      #     站点样式（字体子集内联）
 ├── .pi/                          # Pi 专有资源（其他 agent 不需要）
 │   ├── APPEND_SYSTEM.md          #   追加进 Pi system prompt 的说明（Pi 专用）
 │   └── extensions/podcast-kg.ts  #   extension：环境准备 / PATH / prompt / skill / 命令
-└── src/podcast_kg/               # Python 实现
-    ├── cli.py                    #   子命令实现
-    ├── args.py                   #   argparse 定义：每个子命令的 --help（权威说明）
-    ├── skill_install.py          #   把 skill 装进任意 agent（skills 目录 + 指令文件标记块）
-    ├── runtime.py                #   运行时 pin / bootstrap 转交 / 环境自检
-    ├── deps.py                   #   可选依赖按需安装（pip / uv tool 兼容）
-    ├── outputs.py                #   .outputs/ 约定
-    ├── transcribe.py             #   faster-whisper 封装（段级时间戳、VAD、--words 词级对齐）
-    ├── models.py                 #   whisper 权重：已知模型表、本地/HF 解析、预取与校验
-    ├── i18n.py                   #   双语卡：结构对齐检查、字段合并、译文骨架
-    ├── render_card.py            #   知识卡 JSON → HERON 同款 HTML（DOM 与站点对齐）
-    ├── render_arcs.py            #   话题弧校验页（点一次连播一整段）
-    ├── assets/heron.css          #   站点样式（字体子集已内联，随包装配）
-    ├── verify_cards.py           #   跨卡实体 / 人物归一校验
-    └── ingest_graph.py           #   知识卡 JSON → 可溯源图谱快照（纯标准库）
 ```
 
 ## 工作流
@@ -392,7 +389,7 @@ podcast-knowledge-graph/
 | `redirect` | 纯导流：不内联音频、不发音频请求，点时间戳只复制定位提示  |
 
 
-页面与 [heronai.top](https://heronai.top) 的详情页**同一套 DOM 与样式**（`src/podcast_kg/assets/heron.css`
+页面与 [heronai.top](https://heronai.top) 的详情页**同一套 DOM 与样式**（`skills/podcast-knowledge-graph/lib/podcast_kg/assets/heron.css`
 即站点样式，字体子集内联），所以本地导出的单文件 HTML 跟线上看起来是同一版：
 
 - **阅读单位是话题弧**：卡里有 `arcs`（或旁挂 `<card>_arcs.json`、或 `--arcs` 指定）时，

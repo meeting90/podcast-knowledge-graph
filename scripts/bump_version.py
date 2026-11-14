@@ -4,7 +4,7 @@
 The version lives in four places because four different consumers read it:
 
   1. pyproject.toml                 → what PyPI/pip sees
-  2. src/podcast_kg/__init__.py     → what `podcast-kg --version` prints
+  2. skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py → what `podcast-kg --version` prints
   3. skills/.../runtime.json        → what the skill pins when installing
   4. skills/.../bin/bootstrap.py    → the pin embedded for standalone scripts
 
@@ -35,7 +35,7 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 def targets(root: Path) -> dict[str, Path]:
     return {
         "pyproject": root / "pyproject.toml",
-        "package": root / "src" / "podcast_kg" / "__init__.py",
+        "package": root / "skills/podcast-knowledge-graph/lib" / "podcast_kg" / "__init__.py",
         "runtime": root / SKILL / "runtime.json",
         "bootstrap": root / SKILL / "bin" / "bootstrap.py",
     }

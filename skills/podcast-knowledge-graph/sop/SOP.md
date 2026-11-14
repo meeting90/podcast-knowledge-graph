@@ -374,7 +374,7 @@ whisper 对人名/产品名易错（clock→Claude、虎精→Orca、曾敏→�
   「导出 picks」下载 `picks_<id>.json` 回填卡片。
 * **多语言**：`--i18n en=<id>.en.json` 把译文并入同一份 DOM，顶栏出现「中文 / EN」切换；
   DOM、id、深链、播放器只有一份，切换只改文字（含按钮、提示、目录、时间条）。
-* 站点样式更新后重跑 `python scripts/refresh_heron_css.py`（见 `src/podcast_kg/assets/README.md`）。
+* 站点样式更新后重跑 `python scripts/refresh_heron_css.py`（见 `skills/podcast-knowledge-graph/lib/podcast_kg/assets/README.md`）。
 
 ---
 

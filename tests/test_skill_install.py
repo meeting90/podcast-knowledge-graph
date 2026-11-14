@@ -1,6 +1,6 @@
 """Tests for the agent-agnostic skill installer.
 
-Run with:  PYTHONPATH=src python -m unittest discover -s tests -v
+Run with:  PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"))
 
 from podcast_kg import skill_install as si  # noqa: E402
 

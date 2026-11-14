@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"))
 
 from podcast_kg import i18n  # noqa: E402
 from podcast_kg.render_card import render  # noqa: E402
@@ -248,7 +248,7 @@ class CliTest(unittest.TestCase):
             encoding="utf-8",
             errors="replace",
             env={
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"),
+                "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"),
                 "PATH": "",
             },
         )

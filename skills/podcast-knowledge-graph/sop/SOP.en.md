@@ -362,7 +362,7 @@ top bar → card header (platform/date, title, people, segment/claim counts, ori
 * **The reading unit is the topic arc**: with `arcs` in the card (or `--arcs`, or a sibling `<card>_arcs.json`), each group renders `av-arc` cards; expanding shows "host's opening line → beats → key quotes → remaining claims"; without `arcs` it falls back to claim rows.
 * **Picks**: ★ is stored in browser localStorage; "My picks" filters, "Share my view" copies a `#picks=…` link, "Export picks" downloads `picks_<id>.json`.
 * **Multilingual**: `--i18n en=<id>.en.json` merges the translation into the same DOM and adds a "中文 / EN" switch; DOM, ids, deep links and the player stay single, only text changes (including buttons, hints, contents, time bar).
-* After updating site styles, re-run `python scripts/refresh_heron_css.py` (see `src/podcast_kg/assets/README.md`).
+* After updating site styles, re-run `python scripts/refresh_heron_css.py` (see `skills/podcast-knowledge-graph/lib/podcast_kg/assets/README.md`).
 
 ---
 

@@ -1,6 +1,6 @@
 """Graph snapshot tests: deterministic merging, edge validation, provenance.
 
-Run with:  PYTHONPATH=src python -m unittest discover -s tests -v
+Run with:  PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"))
 
 from podcast_kg.ingest_graph import (  # noqa: E402
     build_graph,
@@ -208,7 +208,7 @@ class IngestTest(unittest.TestCase):
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={"PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"), "PATH": ""},
+            env={"PYTHONPATH": str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"), "PATH": ""},
         )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("claims", proc.stderr)

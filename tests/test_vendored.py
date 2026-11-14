@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SKILL = REPO / "skills" / "podcast-knowledge-graph"
 LAUNCHER = SKILL / "bin" / "podcast-kg.py"
-sys.path.insert(0, str(REPO / "src"))
+sys.path.insert(0, str(REPO / "skills/podcast-knowledge-graph/lib"))
 
 
 def load(name: str, path: Path):
@@ -36,13 +36,9 @@ def clean_env(**extra: str) -> dict:
     return env
 
 
-class SyncTest(unittest.TestCase):
-    def test_vendored_copy_matches_source(self) -> None:
-        module = load("sync_skill_lib", REPO / "scripts" / "sync_skill_lib.py")
-        problems = module.diff()
-        self.assertEqual(problems, [], "run: python scripts/sync_skill_lib.py")
-
-    def test_required_modules_exist(self) -> None:
+class LayoutTest(unittest.TestCase):
+    def test_single_source_lives_in_the_skill(self) -> None:
+        self.assertFalse((REPO / "src" / "podcast_kg").exists(), "src/ must not keep a second copy")
         for name in ("cli.py", "__main__.py", "i18n.py", "models.py", "render_card.py"):
             self.assertTrue((SKILL / "lib" / "podcast_kg" / name).is_file(), name)
         self.assertTrue((SKILL / "lib" / "podcast_kg" / "assets" / "heron.css").is_file())

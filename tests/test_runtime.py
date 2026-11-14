@@ -1,6 +1,6 @@
 """Runtime-guarantee tests: the pin, the bootstrap, and post-install checks.
 
-Run with:  PYTHONPATH=src python -m unittest discover -s tests -v
+Run with:  PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "podcast-knowledge-graph" / "lib"))
 
 from podcast_kg import __version__  # noqa: E402
 from podcast_kg import runtime  # noqa: E402

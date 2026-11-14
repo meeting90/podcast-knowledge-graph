@@ -7,7 +7,7 @@
 An **agent-agnostic skill + Python CLI**. The same skill installs into Pi, Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Copilot, or any agent that reads `AGENTS.md`, and turns podcasts / long videos / deep interviews into **source-linked knowledge cards** (JSON + Markdown), renders them as [HERON](https://heronai.top)-style claim pages (collapsible, timestamp links back to the audio), or writes them into a knowledge graph.
 
 - **Agent Skills folder** (`skills/podcast-knowledge-graph/`): just `SKILL.md` + `sop/` + `examples/`, no agent-specific format — `podcast-kg install-skill` copies it into each agent's skills directory.
-- **Python package** (`src/podcast_kg`): the CLI that does the work — transcribe, verify, render, graph snapshot, and install the skill.
+- **Python package** (`skills/podcast-knowledge-graph/lib/podcast_kg`): the CLI that does the work — transcribe, verify, render, graph snapshot, and install the skill.
 - **Pi extension** (`.pi/extensions/podcast-kg.ts`, optional): a thin bridge that prepares the Python env, puts `podcast-kg` on PATH, appends a system prompt and registers the skill. Only Pi needs it.
 
 Every claim carries an **audio timestamp range**, so it can link straight back to the episode — that is the difference between this and a generic "AI summary".
@@ -125,8 +125,8 @@ python3 <skill>/bin/bootstrap.py --models small   # install deps + prefetch weig
 ```
 
 - **Vendored CLI**: `lib/podcast_kg`, version pinned by `runtime.json`; `render/verify/ingest/i18n/models`
-  never touch the network or install anything. `install-skill` refreshes `lib/` to the installing CLI's
-  version so the skill and CLI never drift (`scripts/sync_skill_lib.py --check` guards it in CI).
+  never touch the network or install anything. `install-skill` copies its own package into the target skill's `lib/`, so
+the skill and the CLI that installed it never drift.
 - **Deps only**: `deps` in `runtime.json` (`faster-whisper` + `av<19`) are installed into
   `$PODCAST_KG_HOME/venv` on the first `transcribe` or `models fetch`; `bin/podcast-kg.py` switches to
   that venv's Python automatically.
@@ -217,7 +217,7 @@ Everything is written to `.outputs/` in the **current directory**. **`--help` is
 > similarity and got it wrong: it merged "Peking University" into "Beijing Normal University",
 > `minsky` into `zuckerberg`, and two different claims (`c33` / `c43`) into one id — every bad merge
 > looked perfectly valid. Its claimed PROV-O provenance lived only in process memory and was never
-> written out. The current implementation (`src/podcast_kg/ingest_graph.py`) only dedupes by id,
+> written out. The current implementation (`skills/podcast-knowledge-graph/lib/podcast_kg/ingest_graph.py`) only dedupes by id,
 > validates edge endpoints and self-loops, and writes provenance into `*_graph.json` under `provenance[]`.
 
 Auto-install uses `pip` or `uv pip install --python <python>` depending on how the interpreter is managed (`uv tool` venvs have no pip). To control it yourself:
@@ -245,7 +245,7 @@ podcast-kg setup --agent-dir /tmp/pk-agent --dry-run
 podcast-kg setup --agent-dir /tmp/pk-agent
 
 uv build                                 # the wheel maps skills/ to podcast_kg/skill
-PYTHONPATH=src python -m unittest discover -s tests -v   # installer tests
+PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 ```
 
 ## Packaging and publishing (Agensi / ZIP)
@@ -264,115 +264,30 @@ The ZIP contains **the skill only** (14 files, ~155 KB, 126k characters):
 
 ```
 podcast-knowledge-graph/
-├── SKILL.md / SKILL.en.md      triggers, steps, quality gates (zh/en)
-├── sop/SOP.md / SOP.en.md      extraction spec (zh/en)
-├── examples/                   one complete example card (JSON + Markdown)
-├── bin/bootstrap.py            runtime bootstrap (stdlib; version pin embedded)
-├── bin/bootstrap / .cmd        optional launchers
-├── bin/README.md / .en.md      bootstrap behaviour
-├── pointer.md                  generic block installed into AGENTS.md / CLAUDE.md
-└── runtime.json                version pin (bootstrap prefers it)
-```
-
-The ZIP is the **complete skill including the CLI** (33 files, ~600 KB). It does **not**
-include whisper weights, caches or a virtualenv: `render/verify/ingest/i18n/models` work offline
-straight away, and the first `transcribe` installs only the two dependencies
-(`faster-whisper`, `av`) into a private venv. `lib/podcast_kg` is kept identical to
-`src/podcast_kg` by `scripts/sync_skill_lib.py` (CI-checked), so the skill never depends on a
-separately published PyPI package.
-
-The packager enforces Agensi's rules: ≤50 MB, ≤1000 files, ≤6M characters; rejects
-exe/dll/so and friends; strips `.git`, `__pycache__`, `.DS_Store`, `node_modules`,
-`site-packages` and virtualenvs. One advisory: `bin/bootstrap.py` is ~28 KB, slightly
-over their "keep scripts under 20 KB for review" guideline (not a hard limit).
-
-### Publishing the ZIP through git
-
-| Option | How | Verdict |
-| --- | --- | --- |
-| **GitHub Release asset (recommended)** | `git tag v0.1.0 && git push --tags`; `.github/workflows/skill-zip.yml` builds and uploads the zip | the binary never enters git history; each update is just a new release asset |
-| Commit the zip | put it in `dist/` (already git-ignored) | possible, but every doc change adds a binary commit and bloats history |
-| GitHub auto archive | `https://github.com/meeting90/podcast-knowledge-graph/archive/refs/tags/v0.1.0.zip` | contains the whole repo (Python source, tests), not a skill-only package — not suitable for the marketplace |
-
-Upload by hand instead:
-
-```bash
-gh release create v0.1.0 dist/podcast-knowledge-graph-<version>.zip --generate-notes
-# or add the asset to an existing release:
-gh release upload v0.1.0 dist/podcast-knowledge-graph-<version>.zip --clobber
-```
-
-On Agensi: upload the zip → set a price → 8-point automated security scan + AI intent
-review + human review → live. Updates are a new version upload; buyers' agents fetch the
-current version on demand.
-
-### Versioning and releases (merge → tag → release)
-
-The version lives in four places (package metadata / `--version` / the skill's `runtime.json` / the
-pin embedded in bootstrap). One script keeps them in sync:
-
-```bash
-python scripts/bump_version.py --check        # also runs in CI
-python scripts/bump_version.py patch          # 0.1.0 -> 0.1.1 (minor / major too)
-python scripts/bump_version.py --set 0.2.0
-```
-
-Recommended flow:
-
-1. Bump the version **inside the PR** (`bump_version.py …`) together with the change;
-2. Merging to `main` runs `.github/workflows/release.yml`:
-   - verifies the four files agree (fails otherwise);
-   - if `v<version>` does not exist: tags it, creates a Release and attaches the skill ZIP
-     (`--generate-notes` writes the changelog from merged PRs);
-   - if it exists: no-op, so merges that do **not** bump the version never re-release;
-3. Manual release:
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0          # the skill-zip workflow creates the Release
-# or directly (zip already in dist/):
-gh release create v0.2.0 dist/podcast-knowledge-graph-0.2.0.zip --generate-notes
-```
-
-`gh` is just a CLI — it does not watch merges. Automation comes from Actions (`push: main`).
-The only real rule: **bump the version in the PR**, otherwise there is no new tag to release.
-
-**Release-notes grouping**: `.github/release.yml` splits changes into Features / Fixes / Documentation /
-Maintenance / Other. When the PR title uses a Conventional Commits prefix (`feat:` / `fix:` / `docs:` /
-`chore:` …, including `feat(api)!:`), `pr-label.yml` adds the matching label automatically; add the
-`skip-changelog` label to hide a PR from the notes.
-
-## Layout
-
-```
-podcast-knowledge-graph/
 ├── package.json                  # Pi package manifest: extension + skills
-├── pyproject.toml                # Python package podcast-kg: deps, CLI entry point
-├── skills/podcast-knowledge-graph/pointer.md   # generic block written into AGENTS.md / CLAUDE.md
+├── pyproject.toml                # Python package podcast-kg (packages from the skill's lib/)
 ├── skills/podcast-knowledge-graph/   # Agent Skills folder (single source; mapped into the wheel)
 │   ├── SKILL.md                  #   triggers, steps, quality gates (Chinese; English: SKILL.en.md)
 │   ├── pointer.md                #   generic block installed into AGENTS.md / CLAUDE.md
-│   ├── runtime.json              #   runtime pin: which podcast-kg version bootstrap installs
-│   ├── bin/bootstrap.py          #   stdlib-only self-heal: private venv + PATH shim
-│   ├── sop/SOP.md                #   extraction spec: schema, naming, relations, QA checklist (English: SOP.en.md)
-│   └── examples/                 #   one complete example card (JSON + Markdown)
+│   ├── runtime.json              #   version + dependency pin
+│   ├── bin/podcast-kg.py         #   launcher: runs the bundled CLI, installs deps on first use
+│   ├── bin/bootstrap.py          #   deps only: private venv + PATH shim
+│   ├── sop/SOP.md                #   extraction spec (English: SOP.en.md)
+│   ├── examples/                 #   one complete example card (JSON + Markdown)
+│   └── lib/podcast_kg/           #   the CLI itself (only copy of the Python package)
+│       ├── cli.py                #     subcommand implementations
+│       ├── args.py               #     argparse: each subcommand's --help (the contract)
+│       ├── transcribe.py         #     faster-whisper wrapper (segments, VAD, --words)
+│       ├── render_card.py        #     card JSON → HERON-compatible HTML
+│       ├── i18n.py               #     bilingual cards: parity check, merge, scaffold
+│       ├── models.py             #     whisper weights: resolution, prefetch, verify
+│       ├── ingest_graph.py       #     source-linked graph snapshot (stdlib)
+│       ├── skill_install.py      #     install into any agent
+│       ├── runtime.py / deps.py  #     runtime pin / dependencies
+│       └── assets/heron.css      #     site stylesheet (font subset inlined)
 ├── .pi/                          # Pi-only resources (other agents don't need them)
 │   ├── APPEND_SYSTEM.md          #   prompt block appended to Pi's system prompt (Pi-only)
 │   └── extensions/podcast-kg.ts  #   extension: env prep / PATH / prompt / skill / command
-└── src/podcast_kg/               # Python implementation
-    ├── cli.py                    #   subcommand implementations
-    ├── args.py                   #   argparse: each subcommand's --help (the contract)
-    ├── skill_install.py          #   install the skill into any agent (skills dir + pointer block)
-    ├── runtime.py                #   runtime pin / bootstrap delegation / env check
-    ├── deps.py                   #   install optional deps on demand (pip / uv tool compatible)
-    ├── outputs.py                #   the .outputs/ convention
-    ├── transcribe.py             #   faster-whisper wrapper (segments, VAD, --words alignment)
-    ├── models.py                 #   whisper weights: table, local/HF resolution, prefetch, verify
-    ├── i18n.py                   #   bilingual cards: parity check, merge, translation scaffold
-    ├── render_card.py            #   card JSON → HERON-compatible HTML (same DOM as the site)
-    ├── render_arcs.py            #   arc verification page (one click plays a whole segment)
-    ├── assets/heron.css          #   site stylesheet (font subset inlined, shipped with the package)
-    ├── verify_cards.py           #   cross-card entity / person normalisation checks
-    └── ingest_graph.py           #   card JSON → source-linked graph snapshot (stdlib)
 ```
 
 ## Workflow
@@ -404,7 +319,7 @@ See [**heronai.top**](https://heronai.top) for the finished shape: those pages a
 | `redirect` | Link-out only: no audio inlined, no audio requests; clicking a timestamp copies a cue |
 
 The page shares the **same DOM and stylesheet** as [heronai.top](https://heronai.top) detail pages
-(`src/podcast_kg/assets/heron.css` is the site stylesheet, font subset inlined), so the exported
+(`skills/podcast-knowledge-graph/lib/podcast_kg/assets/heron.css` is the site stylesheet, font subset inlined), so the exported
 single file looks exactly like the live one:
 
 - **The reading unit is the topic arc**: when the card has `arcs` (or a sibling `<card>_arcs.json`, or `--arcs`),

@@ -1,7 +1,7 @@
 name: release
 
 # Tag + GitHub Release after a version-bumped PR is merged.
-# The version lives in pyproject.toml, src/podcast_kg/__init__.py,
+# The version lives in pyproject.toml, skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py,
 # skills/.../runtime.json and skills/.../bin/bootstrap.py; bump it in the PR:
 #   python scripts/bump_version.py minor
 # Merging that PR creates tag v<version> and a release with the skill ZIP.
@@ -40,13 +40,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Unit tests (stdlib only)
-        run: PYTHONPATH=src python -m unittest discover -s tests -v
+        run: PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
       - name: Validate the skill package
         run: python scripts/package_skill.py --check
       - name: Validate the four version locations
         run: python scripts/bump_version.py --check
-      - name: Validate the vendored CLI
-        run: python scripts/sync_skill_lib.py --check
 
   release:
     needs: test

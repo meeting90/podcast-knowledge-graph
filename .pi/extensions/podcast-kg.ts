@@ -1,7 +1,7 @@
 /**
  * podcast-knowledge-graph — Pi extension.
  *
- * The work is done by the bundled Python package (`src/podcast_kg`, CLI name
+ * The work is done by the bundled Python package (`skills/podcast-knowledge-graph/lib/podcast_kg`, CLI name
  * `podcast-kg`). This file is the Pi-side bridge and does four things:
  *
  *   1. prepares a private Python environment with **all** dependencies

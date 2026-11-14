@@ -31,7 +31,7 @@ from pathlib import Path
 # The pin is embedded so this script still works when it is copied alone to a
 # temp file (marketplaces execute each script standalone, without the package
 # around it). `runtime.json` overrides these when the skill folder is intact.
-PIN_VERSION = "0.1.1"
+PIN_VERSION = "0.1.2"
 PIN_EXTRAS = ["all"]
 PIN_GIT = "git+https://github.com/meeting90/podcast-knowledge-graph"
 DEFAULT_PIN = {
@@ -155,8 +155,14 @@ def local_project(skill_root: Path) -> Path | None:
             text = pyproject.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if 'name = "podcast-kg"' in text and (candidate / "src" / "podcast_kg").is_dir():
-            return candidate
+        if 'name = "podcast-kg"' not in text:
+            continue
+        for rel in (
+            Path("skills") / "podcast-knowledge-graph" / "lib" / "podcast_kg",
+            Path("src") / "podcast_kg",  # older checkouts
+        ):
+            if (candidate / rel).is_dir():
+                return candidate
     return None
 
 

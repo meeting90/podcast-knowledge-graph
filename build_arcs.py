@@ -28,7 +28,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills/podcast-knowledge-graph/lib"))
 from podcast_kg.arcs import build_file  # noqa: E402
 from podcast_kg.render_arcs import render  # noqa: E402
 

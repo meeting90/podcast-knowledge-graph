@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""刷新 `src/podcast_kg/assets/heron.css`：把 heronai.top 的站点样式取下来，字体子集内联。
+"""刷新 `skills/podcast-knowledge-graph/lib/podcast_kg/assets/heron.css`：把 heronai.top 的站点样式取下来，字体子集内联。
 
 为什么要有这个脚本
 ------------------
@@ -32,7 +32,7 @@ import urllib.request
 from urllib.parse import urljoin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TARGET = os.path.join(HERE, "..", "src", "podcast_kg", "assets", "heron.css")
+TARGET = os.path.join(HERE, "..", "skills/podcast-knowledge-graph/lib", "podcast_kg", "assets", "heron.css")
 
 
 def get(url: str) -> bytes:
@@ -92,7 +92,7 @@ def main() -> int:
 
     header = (
         "/* HERON 站点样式（自 https://heronai.top 取，内联字体子集后随包装配）\n"
-        "   生成方式见 src/podcast_kg/assets/README.md；请勿手改。 */\n"
+        "   生成方式见 skills/podcast-knowledge-graph/lib/podcast_kg/assets/README.md；请勿手改。 */\n"
     )
     out = os.path.normpath(TARGET)
     with open(out, "w", encoding="utf-8", newline="\n") as fh:

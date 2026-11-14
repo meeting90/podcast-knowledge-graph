@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "src"))
+sys.path.insert(0, str(REPO / "skills/podcast-knowledge-graph/lib"))
 
 from podcast_kg import __version__  # noqa: E402
 
