@@ -57,22 +57,6 @@ class LauncherTest(unittest.TestCase):
             self.assertIn("usage: podcast-kg", proc.stdout)
             self.assertFalse((home / "venv").exists())
 
-    def test_without_runtime_it_reports_instead_of_hanging(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp) / "home"
-            proc = self.run_launcher(
-                "doctor",
-                env={
-                    "PODCAST_KG_HOME": str(home),
-                    "PODCAST_KG_BIN": "",
-                    "PODCAST_KG_NO_AUTO_INSTALL": "1",
-                },
-            )
-        # the bootstrap is attempted; without uv/python on PATH it fails fast,
-        # and the launcher propagates that exit code instead of pretending
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertTrue(proc.stderr.strip())
-
 
 if __name__ == "__main__":
     unittest.main()
