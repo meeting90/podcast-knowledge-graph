@@ -55,7 +55,7 @@ class InstallTest(unittest.TestCase):
         (source / "__pycache__").mkdir(parents=True)
         (source / "SKILL.md").write_text("# s", encoding="utf-8")
         (source / "bin").mkdir()
-        (source / "bin" / "bootstrap.py").write_text("print(1)", encoding="utf-8")
+        (source / "bin" / "podcast-kg.py").write_text("print(1)", encoding="utf-8")
         (source / "bin" / "__pycache__").mkdir()
         (source / "bin" / "__pycache__" / "bootstrap.cpython-312.pyc").write_bytes(b"x")
         (source / "bin" / "stray.pyc").write_bytes(b"x")
@@ -66,7 +66,7 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("__pycache__", names)
         self.assertNotIn("stray.pyc", names)
         self.assertTrue((dest / "SKILL.md").is_file())
-        self.assertTrue((dest / "bin" / "bootstrap.py").is_file())
+        self.assertTrue((dest / "bin" / "podcast-kg.py").is_file())
 
     def test_pointer_block_is_idempotent_and_keeps_existing_text(self) -> None:
         agents_md = self.project / "AGENTS.md"

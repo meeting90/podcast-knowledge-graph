@@ -11,7 +11,6 @@ Subcommands:
   unsetup     remove that installation
   install-skill    install the skill into any agent (pi / claude / codex / …)
   uninstall-skill  remove it again
-  bootstrap   make the skill's runtime usable (private venv + PATH shim)
   doctor      environment check / optional dependency install
 """
 
@@ -304,7 +303,7 @@ def cmd_install_skill(args: argparse.Namespace) -> int:
         failed = [item for item in checks if not item["ok"]]
         if failed:
             print(
-                "\n修复：`podcast-kg bootstrap`（装 CLI）；"
+                "\n修复：重装 skill（缺 lib/）或提供转写稿；"
                 "`podcast-kg install-skill --force`（补文件与 runtime.json）",
                 file=sys.stderr,
             )
@@ -330,33 +329,8 @@ def cmd_install_skill(args: argparse.Namespace) -> int:
             "重开 agent 会话（Pi 用 /reload）后，skill `podcast-knowledge-graph` 即可被发现；"
             "不认 skill 格式的 agent 会从上面的指令文件找到它。"
         )
-        print("运行时自检：`podcast-kg install-skill --verify`；缺 CLI 时：`podcast-kg bootstrap`")
+        print("运行时自检：`podcast-kg install-skill --verify`；转写需要环境里的 faster-whisper")
     return 0
-
-
-def cmd_bootstrap(args: argparse.Namespace) -> int:
-    from .runtime import run_bootstrap
-
-    argv: list[str] = []
-    for flag, attribute in (
-        ("--check", "check"),
-        ("--plan", "plan"),
-        ("--json", "json"),
-        ("--quiet", "quiet"),
-        ("--no-shim", "no_shim"),
-    ):
-        if getattr(args, attribute):
-            argv.append(flag)
-    for flag, attribute in (
-        ("--version", "pin_version"),
-        ("--extras", "extras"),
-        ("--home", "home"),
-        ("--python", "python"),
-    ):
-        value = getattr(args, attribute)
-        if value:
-            argv.extend([flag, value])
-    return run_bootstrap(argv)
 
 
 def cmd_uninstall_skill(args: argparse.Namespace) -> int:
@@ -604,7 +578,6 @@ COMMANDS = {
     "models": cmd_models,
     "install-skill": cmd_install_skill,
     "uninstall-skill": cmd_uninstall_skill,
-    "bootstrap": cmd_bootstrap,
     "setup": cmd_setup,
     "unsetup": cmd_unsetup,
     "doctor": cmd_doctor,

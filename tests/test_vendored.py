@@ -77,7 +77,7 @@ class DepsGuardTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 deps.ensure("module_that_does_not_exist_xyz")
         self.assertIn("内置", str(caught.exception))
-        self.assertIn("bin/podcast-kg.py", str(caught.exception))
+        self.assertIn("faster-whisper", str(caught.exception))
 
 
 class PackageTest(unittest.TestCase):

@@ -6,7 +6,6 @@ The version lives in four places because four different consumers read it:
   1. pyproject.toml                 → what PyPI/pip sees
   2. skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py → what `podcast-kg --version` prints
   3. skills/.../runtime.json        → what the skill pins when installing
-  4. skills/.../bin/bootstrap.py    → the pin embedded for standalone scripts
 
 Usage:
     python scripts/bump_version.py --check
@@ -37,7 +36,6 @@ def targets(root: Path) -> dict[str, Path]:
         "pyproject": root / "pyproject.toml",
         "package": root / "skills/podcast-knowledge-graph/lib" / "podcast_kg" / "__init__.py",
         "runtime": root / SKILL / "runtime.json",
-        "bootstrap": root / SKILL / "bin" / "bootstrap.py",
     }
 
 
@@ -64,7 +62,6 @@ def found(root: Path) -> dict[str, str | None]:
         "pyproject": grab(paths["pyproject"], r'^version\s*=\s*"([^"]+)"'),
         "package": grab(paths["package"], r'^__version__\s*=\s*"([^"]+)"'),
         "runtime": grab(paths["runtime"], r'"version"\s*:\s*"([^"]+)"'),
-        "bootstrap": grab(paths["bootstrap"], r'^PIN_VERSION\s*=\s*"([^"]+)"'),
     }
 
 
@@ -122,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {name}: {value}", file=sys.stderr)
             print("fix with: python scripts/bump_version.py --set " + current, file=sys.stderr)
             return 1
-        print(f"version OK: {current} (pyproject / package / runtime.json / bootstrap)")
+        print(f"version OK: {current} (pyproject / package / runtime.json)")
         return 0
 
     if args.set:

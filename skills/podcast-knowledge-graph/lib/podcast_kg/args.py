@@ -392,41 +392,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=None, name="uninstall-skill")
 
     p = add(
-        "bootstrap",
-        "让 skill 的运行时可直接使用（装 CLI 到私有 venv）",
-        "skill 只是文件；真正干活的是 `podcast-kg` CLI。本子命令转交给 skill 自带的 `bin/bootstrap.py`："
-        "先找 PATH 上的 CLI，找不到就用 uv（可自带 Python 3.12）装 pin 住的版本到私有 venv，"
-        "再写 PATH shim。幂等：已就绪时直接返回。",
-        """参数（透传给 bin/bootstrap.py，以 `python3 bin/bootstrap.py --help` 为准）
-  --check        只检查，不安装；未就绪退出码 1
-  --plan         报告将要做什么，不动文件
-  --json         机器可读报告（含 ready / cli / version / pinned / action / notes）
-  --quiet        不打印过程信息
-  --version SPEC 覆盖 pin 的版本（默认读 skill 目录下的 runtime.json）
-  --extras LIST  all（默认）| none | 逗号分隔；离线只用 render/verify 时选 none
-  --home DIR     覆盖运行时装在哪（默认 $PODCAST_KG_HOME）
-  --python EXE   指定解释器 / 版本（默认 uv 管理的 3.12）
-  --no-shim      只装 venv，不写 PATH shim
-
-输出
-  CLI 路径 + 版本 + 运行时目录；--json 时同样的信息
-
-失败语义
-  无 uv 且无 Python ≥3.10 → 退出码 1，并给出装 uv 的命令
-  安装 / venv 创建失败 → 退出码 1，notes 带最后几行真实错误""",
-    )
-    p.add_argument("--check", action="store_true", help="只检查，不安装；未就绪退出码 1")
-    p.add_argument("--plan", action="store_true", help="报告将要做什么，不动文件")
-    p.add_argument("--json", action="store_true", help="机器可读输出")
-    p.add_argument("--quiet", action="store_true", help="不打印过程信息")
-    p.add_argument("--version", dest="pin_version", metavar="SPEC", help="覆盖 pin 的版本（如 0.1.0 / latest）")
-    p.add_argument("--extras", metavar="LIST", help="all（默认）| none | 逗号分隔的 extras")
-    p.add_argument("--home", metavar="DIR", help="覆盖运行时安装位置")
-    p.add_argument("--python", metavar="EXE", help="指定 Python 解释器 / 版本")
-    p.add_argument("--no-shim", action="store_true", help="只装 venv，不写 PATH shim")
-    p.set_defaults(func=None, name="bootstrap")
-
-    p = add(
         "setup",
         "安装 Pi skill（= install-skill --target pi）",
         "兼容旧命令：等价于 install-skill --target pi。要把 skill 装进 Claude Code / Codex / 其他 agent，用 install-skill。",

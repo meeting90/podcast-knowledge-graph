@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "podcast-kg"
-version = "0.1.2"
+version = "0.1.3"
 description = "Timestamped, source-linked knowledge cards for podcasts: transcribe, verify, render, ingest — and install the matching agent skill anywhere."
 readme = "README.md"
 license = "MIT"
@@ -41,8 +41,17 @@ packages = ["skills/podcast-knowledge-graph/lib/podcast_kg"]
 # Single source of truth lives at `skills/` (the Agent Skills convention), so the
 # same folder works for Pi, Claude Code and `podcast-kg install-skill`; the wheel
 # maps it to `podcast_kg/skill`.
+# The wheel ships the skill's docs/scripts, but NOT skill/lib: the importable
+# `podcast_kg` package above is the single copy. `install-skill` writes `lib/`
+# into the target skill from the installed package.
 [tool.hatch.build.targets.wheel.force-include]
-"skills/podcast-knowledge-graph" = "podcast_kg/skill"
+"skills/podcast-knowledge-graph/SKILL.md" = "podcast_kg/skill/SKILL.md"
+"skills/podcast-knowledge-graph/SKILL.en.md" = "podcast_kg/skill/SKILL.en.md"
+"skills/podcast-knowledge-graph/pointer.md" = "podcast_kg/skill/pointer.md"
+"skills/podcast-knowledge-graph/runtime.json" = "podcast_kg/skill/runtime.json"
+"skills/podcast-knowledge-graph/bin" = "podcast_kg/skill/bin"
+"skills/podcast-knowledge-graph/sop" = "podcast_kg/skill/sop"
+"skills/podcast-knowledge-graph/examples" = "podcast_kg/skill/examples"
 
 [tool.hatch.build.targets.sdist]
 include = [

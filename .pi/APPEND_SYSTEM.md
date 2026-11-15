@@ -4,8 +4,8 @@
 通过 bash 调用 `podcast-kg` 命令。先执行 `podcast-kg --help` 选择子命令，再执行 `podcast-kg <子命令> --help` 查看参数、输入输出及失败语义。这些是命令行程序。
 
 Pi 侧环境由扩展准备好了：`podcast-kg` 已在 PATH；`/podcast-kg doctor` 等价于 `podcast-kg doctor`。
-命令不存在或报错时，先跑随 skill 分发的 `bin/bootstrap.py`，再重试 `podcast-kg doctor`；
-两条都失败才向用户报告，并附上命令输出。
+命令不存在时用 skill 自带的启动器 `python3 <skill>/bin/podcast-kg.py doctor`；
+转写依赖由 Pi 扩展准备。两条都失败才向用户报告，并附上命令输出。
 
 抽取规范与质量闸门：`podcast-kg` 装的 skill `podcast-knowledge-graph`（`skills/podcast-knowledge-graph/SKILL.md`）。
 

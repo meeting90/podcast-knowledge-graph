@@ -2,7 +2,7 @@ name: release
 
 # Tag + GitHub Release after a version-bumped PR is merged.
 # The version lives in pyproject.toml, skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py,
-# skills/.../runtime.json and skills/.../bin/bootstrap.py; bump it in the PR:
+# skills/.../runtime.json; bump it in the PR:
 #   python scripts/bump_version.py minor
 # Merging that PR creates tag v<version> and a release with the skill ZIP.
 #

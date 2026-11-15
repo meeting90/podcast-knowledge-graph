@@ -51,7 +51,6 @@ SKIP_SUFFIXES = {".pyc", ".pyo", ".zip", ".log", ".tmp"}
 REQUIRED = (
     "SKILL.md",
     "runtime.json",
-    "bin/bootstrap.py",
     "bin/podcast-kg.py",
     "lib/podcast_kg/cli.py",
     "sop/SOP.md",

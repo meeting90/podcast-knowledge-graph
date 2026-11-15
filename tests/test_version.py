@@ -16,7 +16,6 @@ FILES = [
     "pyproject.toml",
     "skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py",
     "skills/podcast-knowledge-graph/runtime.json",
-    "skills/podcast-knowledge-graph/bin/bootstrap.py",
 ]
 
 
@@ -49,11 +48,6 @@ class VersionTest(unittest.TestCase):
             "pyproject": re.search(r'^version\s*=\s*"([^"]+)"', texts["pyproject.toml"], re.M).group(1),
             "package": re.search(r'^__version__\s*=\s*"([^"]+)"', texts["skills/podcast-knowledge-graph/lib/podcast_kg/__init__.py"], re.M).group(1),
             "runtime": json.loads(texts["skills/podcast-knowledge-graph/runtime.json"])["version"],
-            "bootstrap": re.search(
-                r'^PIN_VERSION\s*=\s*"([^"]+)"',
-                texts["skills/podcast-knowledge-graph/bin/bootstrap.py"],
-                re.M,
-            ).group(1),
         }
 
     def test_repository_is_consistent(self) -> None:

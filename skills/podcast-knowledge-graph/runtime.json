@@ -1,17 +1,7 @@
 {
   "package": "podcast-kg",
-  "version": "0.1.2",
-  "extras": [
-    "all"
-  ],
-  "deps": [
-    "faster-whisper>=1.0.0",
-    "av>=11,<19"
-  ],
+  "version": "0.1.3",
   "requires_python": ">=3.10",
-  "entry": "podcast-kg",
-  "bootstrap": "bin/bootstrap.py",
-  "install_from_git": "git+https://github.com/meeting90/podcast-knowledge-graph",
-  "git_rev": "",
-  "note": "CLI 随 skill 分发（lib/）。bin/bootstrap.py 只把转写依赖装进私有 venv。"
+  "entry": "bin/podcast-kg.py",
+  "note": "CLI 随 skill 分发（lib/），无需安装；transcribe 需要环境里已有 faster-whisper。"
 }

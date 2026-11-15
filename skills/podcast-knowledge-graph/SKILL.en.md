@@ -46,38 +46,29 @@ podcast-kg install-skill --skills-dir DIR --instructions AGENTS.md   # any other
 podcast-kg install-skill --target claude --verify   # post-install check: files / pin / CLI
 ```
 
-**The CLI ships with the skill** (`lib/podcast_kg`), so it works as soon as the files land. Only
-`faster-whisper` / `av` (needed by `transcribe`) are installed later, on first use, into a private venv:
+**The CLI ships with the skill** (`lib/podcast_kg`), so it works as soon as the files land;
+**the skill installs nothing**:
 
-| Case | Where the runtime comes from |
-| --- | --- |
-| Files copied in (marketplace / `npx skills add` / manual unzip) | works immediately; first `transcribe` installs deps |
-| Installed by the Pi extension | first session prepares the venv and deps |
-| Installed via `podcast-kg install-skill` | uses the existing CLI and syncs `lib/` to the same version |
+| Case | CLI | Transcribe runtime |
+| --- | --- | --- |
+| Files copied in (marketplace / `npx skills add` / manual unzip) | works immediately | environment must provide `faster-whisper` |
+| Installed by the Pi extension | the extension prepares a venv | installed with the extension |
+| Installed via `podcast-kg install-skill` | existing CLI, `lib/` synced to the same version | depends on that CLI |
 
-Self-heal commands (idempotent; instant and offline when already ready):
+One entry point:
 
 ```bash
-python3 <skill-dir>/bin/podcast-kg.py doctor     # preferred entry: bundled CLI, installs deps if needed
-python3 <skill-dir>/bin/bootstrap.py             # explicit dependency install (venv + PATH shim)
-python3 <skill-dir>/bin/bootstrap.py --check     # check only; exit 1 if not ready
-python3 <skill-dir>/bin/bootstrap.py --json      # ready / cli / version / pinned / action / notes
-python3 <skill-dir>/bin/bootstrap.py --plan      # report what would happen
-python3 <skill-dir>/bin/bootstrap.py --extras none   # CLI only (render/verify/ingest, offline)
-python3 <skill-dir>/bin/bootstrap.py --models small # deps + prefetch weights (486 MB)
+python3 <skill-dir>/bin/podcast-kg.py doctor
+python3 <skill-dir>/bin/podcast-kg.py render ep.json ep.html
 ```
 
-On Windows use `<skill-dir>\bin\bootstrap.cmd`; on POSIX `<skill-dir>/bin/bootstrap` also works.
-    Marketplaces execute scripts **standalone** from a temp file, so `bootstrap.py` is the contract (the version pin is embedded; it does not read sibling files); the two launchers are local conveniences.
-
-- **Where**: `$PODCAST_KG_HOME` (Windows `%LOCALAPPDATA%\podcast-kg`, macOS `~/Library/Application Support/podcast-kg`, Linux `~/.local/share/podcast-kg`), always a private venv; system Python is untouched. Shims go to `$PODCAST_KG_HOME/bin` (and `~/.local/bin` when present).
-- **What gets installed**: the vendored CLI version is pinned by `version` in `runtime.json`; bootstrap
-  installs only `deps` (`faster-whisper` + `av<19`). It no longer installs a `podcast-kg` package and
-  does not need PyPI.
-- **Works without Python**: uses `uv`; `uv venv --python 3.12` downloads an interpreter when the host has none. Without uv it prints the install command.
-- **Size and network**: the transcribe deps (faster-whisper + ctranslate2) need network once and hundreds of MB; `render`/`verify`/`ingest`/`i18n` need nothing and work offline.
-
-`podcast-kg bootstrap [--check|--plan|--json]` is the same implementation exposed by the CLI; `podcast-kg setup` / `unsetup` are legacy aliases for `--target pi`.
+- `render` / `verify` / `ingest` / `i18n` / `models` / `doctor`: **no dependencies, offline**.
+- `transcribe`: needs `faster-whisper` in the environment. If it is missing the command fails with a
+  clear message and **does not pip install**; ask for a transcript, or state that the environment must
+  provide the runtime.
+- The vendored CLI version is pinned by `version` in `runtime.json`; `install-skill` copies its own
+  package into the target skill's `lib/`.
+- `podcast-kg setup` / `unsetup` are legacy aliases for `--target pi`.
 
 ## Inputs
 
@@ -155,17 +146,16 @@ Full schema and field constraints: [sop/SOP.md](sop/SOP.md) (English: [sop/SOP.e
 Each step states **what to do** and **how to know it is done**; always confirm command syntax with `--help` on the spot.
 
 1.  **Runtime check (every time, first)**
-    Use the bundled launcher — the CLI is inside the skill, so nothing needs installing:
+    Use the bundled launcher (the CLI is inside the skill):
 
     ```bash
     python3 <skill-dir>/bin/podcast-kg.py doctor
     ```
 
-    If `podcast-kg` happens to be on PATH, that works too. `doctor` reporting the transcribe deps
-    as missing is normal: the first `transcribe` / `models fetch` installs `faster-whisper` + `av`
-    into `$PODCAST_KG_HOME/venv` (hundreds of MB, needs network), then works offline. To inspect or
-    preinstall explicitly: `<skill-dir>/bin/bootstrap.py [--check|--json]`. If the launcher fails,
-    report the exact command and output — do not guess.
+    If `podcast-kg` happens to be on PATH, that works too. `doctor` reporting the transcribe deps as
+    missing is normal: the skill installs nothing, and `render/verify/ingest/i18n` still work. Only
+    `transcribe` needs `faster-whisper` in the environment; if it is missing, do not try to install —
+    ask for a transcript, or state that the environment must provide the runtime.
 
 2.  **Transcribe**
     Use the `transcribe` subcommand (`podcast-kg transcribe --help`). You get segment-level timestamps (JSON) plus a `[mm:ss]` transcript; all later references use that timeline. Slice long audio first, ideally ≤40 minutes per piece.
@@ -261,7 +251,7 @@ Topic-arc layer (claim rows alone are not "done"):
 | Inventing relations to look dense | Graph noise | Better fewer edges |
 | Skipping speaker verification | Claims attributed to the wrong person | Read the surrounding turn-taking |
 | Using claim rows as the reading unit | The reader hears half a sentence and must click several times | Ship `arcs`; claims become evidence |
-| Starting extraction before `podcast-kg` works | `command not found` halfway through `transcribe` | Run `doctor`; on failure run `bin/bootstrap.py`, then `doctor` |
+| Starting extraction before `podcast-kg` works | a failure halfway through `transcribe` | Run `bin/podcast-kg.py doctor`; when the runtime is missing, ask for a transcript — do not pip install |
 | Only recording guest claims, dropping the host's questions | Why the topic started, and what it answers, is lost | Put the host's question in `open_question`/`open_line` |
 | Splitting arcs by sentence count or group edges | Cut mid-topic; the listener is cut in half | Boundaries only from pauses and the host |
 | Translation changed ids / timestamps / groups | Language switch misaligns; deep links break | Translate text only; `i18n check` blocks drift |

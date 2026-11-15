@@ -1,4 +1,4 @@
-"""Skill packaging: Agensi rules, deterministic ZIP, standalone bootstrap pin."""
+"""Skill packaging: Agensi rules, deterministic ZIP, bundled CLI."""
 
 from __future__ import annotations
 
@@ -25,25 +25,6 @@ def load(name: str, path: Path):
 
 
 package = load("package_skill", REPO / "scripts" / "package_skill.py")
-bootstrap = load("skill_bootstrap", REPO / "skills" / "podcast-knowledge-graph" / "bin" / "bootstrap.py")
-
-
-class PinTest(unittest.TestCase):
-    def test_embedded_pin_matches_package_and_runtime(self) -> None:
-        self.assertEqual(bootstrap.PIN_VERSION, __version__)
-        runtime = json.loads(
-            (REPO / "skills" / "podcast-knowledge-graph" / "runtime.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(runtime["version"], __version__)
-        self.assertEqual(runtime.get("install_from_git"), bootstrap.PIN_GIT)
-
-    def test_standalone_pin_needs_no_runtime_json(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pin = bootstrap.load_pin(Path(tmp))  # no runtime.json here
-        self.assertEqual(pin["version"], bootstrap.PIN_VERSION)
-        self.assertEqual(bootstrap.pip_spec(pin), f"podcast-kg[all]=={bootstrap.PIN_VERSION}")
-
-
 class InspectTest(unittest.TestCase):
     def test_repository_skill_passes_agensi_checks(self) -> None:
         report = package.inspect()
@@ -98,7 +79,8 @@ class BuildTest(unittest.TestCase):
                 names = archive.namelist()
             self.assertTrue(all(name.startswith("podcast-knowledge-graph/") for name in names))
             self.assertIn("podcast-knowledge-graph/SKILL.md", names)
-            self.assertIn("podcast-knowledge-graph/bin/bootstrap.py", names)
+            self.assertIn("podcast-knowledge-graph/bin/podcast-kg.py", names)
+            self.assertIn("podcast-knowledge-graph/lib/podcast_kg/cli.py", names)
             self.assertFalse(any("__pycache__" in name or name.endswith(".pyc") for name in names))
             self.assertFalse(
                 any(Path(name).suffix.lower() in package.EXECUTABLE_SUFFIXES for name in names)

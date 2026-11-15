@@ -111,33 +111,26 @@ The pointer text comes from `pointer.md`; Pi's own prompt block is `.pi/APPEND_S
 
 ## Runtime: the CLI ships with the skill
 
-| Install path | Where the CLI comes from | Transcribe deps |
+| Install path | Where the CLI comes from | Transcribe runtime |
 | --- | --- | --- |
-| `npx skills` / ZIP / manual copy | `lib/podcast_kg` inside the skill, zero install | installed on first `transcribe` |
+| `npx skills` / ZIP / manual copy | `lib/podcast_kg` inside the skill, zero install | environment must provide `faster-whisper` |
 | Pi extension | the extension prepares a private venv | installed on first session |
-| `install-skill` from an existing CLI | that CLI, plus its `lib/` copy synced to the same version | installed on first `transcribe` |
+| `install-skill` from an existing CLI | that CLI, `lib/` synced to the same version | depends on that CLI |
 
 ```bash
-python3 <skill>/bin/podcast-kg.py doctor          # preferred entry point; installs deps if needed
-python3 <skill>/bin/bootstrap.py --check          # deps/venv check only; exit 1 when not ready
-python3 <skill>/bin/bootstrap.py --json           # ready / vendored / deps / deps_ready / cli / notes
-python3 <skill>/bin/bootstrap.py --models small   # install deps + prefetch weights
+python3 <skill>/bin/podcast-kg.py doctor          # bundled CLI, zero install
+python3 <skill>/bin/podcast-kg.py render ep.json ep.html
+python3 <skill>/bin/podcast-kg.py models fetch --model small
 ```
 
-- **Vendored CLI**: `lib/podcast_kg`, version pinned by `runtime.json`; `render/verify/ingest/i18n/models`
-  never touch the network or install anything. `install-skill` copies its own package into the target skill's `lib/`, so
-the skill and the CLI that installed it never drift.
-- **Deps only**: `deps` in `runtime.json` (`faster-whisper` + `av<19`) are installed into
-  `$PODCAST_KG_HOME/venv` on the first `transcribe` or `models fetch`; `bin/podcast-kg.py` switches to
-  that venv's Python automatically.
-- **Where**: `$PODCAST_KG_HOME` (Windows `%LOCALAPPDATA%\podcast-kg`, macOS `~/Library/Application Support/podcast-kg`,
-  Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`); only a private venv and `bin/` shims are written
-  (plus `~/.local/bin` when present).
-- **Works without Python**: prefers `uv`; `uv venv --python 3.12` downloads an interpreter when the host
-  has none. Without uv it prints the install command.
-- **Size and network**: the deps are hundreds of MB on first install; `render/verify/i18n/ingest` are fully
-  offline; whisper weights are separate (below).
-- **Fails loudly**: exit codes 0/1, real error tails in `--json` `notes`; `PODCAST_KG_BIN` overrides the CLI.
+- **Vendored CLI**: `lib/podcast_kg` is the only copy of the package (pyproject packages from it),
+  pinned by `runtime.json`. `render/verify/ingest/i18n/models` need **nothing** and work offline;
+  `install-skill` copies its own package into the target skill's `lib/`.
+- **Transcribe**: needs `faster-whisper` in the environment. The skill installs nothing; when it is
+  missing the command says so. Provide a transcript, or use an environment that has the runtime
+  (the Pi extension prepares one for Pi).
+- **Weights**: managed separately (`models fetch`).
+- **Scope**: no global venv, no shims, no pip/PyPI dependency — the CLI is just files in the skill.
 
 ### Why whisper weights are not bundled
 
@@ -148,7 +141,7 @@ the skill and the CLI that installed it never drift.
 | Download on first use (default) | just `podcast-kg transcribe` | can reach huggingface.co |
 | Prefetch once, stay offline | `podcast-kg models fetch --model small` | one download, then fully offline |
 | Shared drive / USB / internal mirror | `podcast-kg models fetch --model small --dir /srv/models`, then `PODCAST_KG_MODEL_DIR=/srv/models` or `transcribe --model-dir /srv/models` | many machines, no internet |
-| Install runtime and weights together | `podcast-kg bootstrap --models small` | one command |
+| Prefetch weights (runtime already present) | `python3 <skill>/bin/podcast-kg.py models fetch --model small` | one download, then offline |
 
 ```bash
 podcast-kg models list                    # size / state (local, HF cache, missing) / path
@@ -161,8 +154,7 @@ podcast-kg models path --model small      # usable local path (exit 1 when missi
 - With `PODCAST_KG_OFFLINE=1` (or `HF_HUB_OFFLINE=1`), missing weights **fail immediately** instead of silently waiting through a 130-second timeout.
 - The folder produced by `models fetch` can be copied elsewhere (HF symlinks are materialised, `.cache` is removed). Ship it as a release asset or on a shared drive — not inside the wheel.
 
-Full bootstrap behaviour (resolution order, probing, Windows Store python aliases) lives in
-[`skills/podcast-knowledge-graph/bin/README.md`](skills/podcast-knowledge-graph/bin/README.md).
+Launcher behaviour: [`skills/podcast-knowledge-graph/bin/README.md`](skills/podcast-knowledge-graph/bin/README.md).
 
 ## Usage
 
@@ -183,7 +175,6 @@ podcast-kg transcribe --help           # then read its inputs/outputs/failure mo
 
 ```bash
 podcast-kg doctor                      # environment check (python / ffmpeg / deps / skill / runtime / models)
-podcast-kg bootstrap --check           # is the runtime actually usable (exit 1 if not)
 podcast-kg models fetch --model small  # prefetch weights for offline use
 podcast-kg transcribe ep42.mp3 --model small --lang zh
 podcast-kg transcribe ep42.mp3 --words     # also emit word-level timestamps (for arc boundaries)
@@ -206,27 +197,25 @@ Everything is written to `.outputs/` in the **current directory**. **`--help` is
 > The same data exposed whisper's repetition loop, now fixed by defaulting
 > `condition_on_previous_text` to off (`--carry-context` restores the old behaviour).
 
-### Optional dependencies
+### Dependencies: nothing to install as a Python package
 
-| Subcommand | Dependency | Notes |
-| --- | --- | --- |
-| `render` / `verify` / `install-skill` / `ingest` / `doctor` | **none** (stdlib only) | works offline |
-| `transcribe` | `faster-whisper` | installed on first use |
+| Subcommand | Dependency |
+| --- | --- |
+| `render` / `verify` / `install-skill` / `ingest` / `i18n` / `models` / `doctor` | **none** (stdlib, offline) |
+| `transcribe` | `faster-whisper` must exist in the environment (this skill installs nothing) |
+
+`npx skills` ships every line of code (`lib/podcast_kg`). **There is no `pip install` and no separate
+Python package to publish.** `transcribe` is the only command that needs an external runtime: if
+`faster-whisper` is missing it fails with a clear message (provide a transcript or use an environment
+that has it) instead of installing packages behind your back. Pi users get the runtime from the
+extension; other environments must provide it (conda, system packages, an existing venv).
 
 > Since 0.1.0, `ingest` no longer depends on semantica. Its `merge_entities=True` merged by name
 > similarity and got it wrong: it merged "Peking University" into "Beijing Normal University",
 > `minsky` into `zuckerberg`, and two different claims (`c33` / `c43`) into one id — every bad merge
 > looked perfectly valid. Its claimed PROV-O provenance lived only in process memory and was never
-> written out. The current implementation (`skills/podcast-knowledge-graph/lib/podcast_kg/ingest_graph.py`) only dedupes by id,
-> validates edge endpoints and self-loops, and writes provenance into `*_graph.json` under `provenance[]`.
-
-Auto-install uses `pip` or `uv pip install --python <python>` depending on how the interpreter is managed (`uv tool` venvs have no pip). To control it yourself:
-
-```bash
-podcast-kg doctor --install all         # install ahead of time
-export PODCAST_KG_NO_AUTO_INSTALL=1     # disable auto-install
-uv tool install --with "faster-whisper" podcast-kg      # include transcribe deps
-```
+> written out. The current implementation dedupes by id only, validates edge endpoints and self-loops,
+> and writes provenance into `*_graph.json` under `provenance[]`.
 
 `ffmpeg` is optional: without it, transcription decodes the original audio through PyAV.
 
@@ -235,24 +224,22 @@ uv tool install --with "faster-whisper" podcast-kg      # include transcribe dep
 ```bash
 git clone https://github.com/meeting90/podcast-knowledge-graph
 cd podcast-knowledge-graph
-uv venv && uv pip install -e ".[all]"
 
 pi                                       # load extension + skill as a project
 pi -e .                                  # or load it as a Pi package
 
-# Option B install logic (does not touch your real Pi config)
-podcast-kg setup --agent-dir /tmp/pk-agent --dry-run
-podcast-kg setup --agent-dir /tmp/pk-agent
+# run the bundled CLI directly (installs nothing)
+PYTHONPATH=skills/podcast-knowledge-graph/lib python -m podcast_kg doctor
 
-uv build                                 # the wheel maps skills/ to podcast_kg/skill
+# tests
 PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 ```
 
-## Packaging and publishing (Agensi / ZIP)
+## Packaging (Agensi / ZIP)
 
-Agensi (and most skill marketplaces) accepts **one ZIP**: a single top folder with
-`SKILL.md` at its root, scripts and references in subfolders. This repo ships a
-deterministic packager (same tree → same SHA-256):
+Agensi (and most skill marketplaces) accepts **one ZIP**: a single top folder with `SKILL.md` at its
+root, scripts and references in subfolders. This repo ships a deterministic packager (same tree →
+same SHA-256):
 
 ```bash
 python scripts/package_skill.py           # → dist/podcast-knowledge-graph-<version>.zip
@@ -260,18 +247,93 @@ python scripts/package_skill.py --check   # validate only
 python scripts/package_skill.py --json    # manifest / size / chars / sha256
 ```
 
-The ZIP contains **the skill only** (14 files, ~155 KB, 126k characters):
+The ZIP is the **complete skill including the CLI** (30 files, ~560 KB):
+
+```
+podcast-knowledge-graph/
+├── SKILL.md / SKILL.en.md      triggers, steps, quality gates (zh/en)
+├── sop/SOP.md / SOP.en.md      extraction spec (zh/en)
+├── examples/                   one complete example card (JSON + Markdown)
+├── bin/podcast-kg.py           launcher: runs the bundled CLI
+├── lib/podcast_kg/             the CLI (only copy; includes HTML template/CSS)
+├── pointer.md                  generic block installed into AGENTS.md / CLAUDE.md
+└── runtime.json                version pin
+```
+
+It does **not** include whisper weights, caches or a virtualenv: `render/verify/ingest/i18n/models`
+work offline straight away. `transcribe` needs `faster-whisper` in the environment (the skill installs
+nothing). `lib/podcast_kg` is the only copy of the package (pyproject packages from it), so there is no
+second source and no separately published PyPI package.
+
+The packager enforces Agensi's rules: ≤50 MB, ≤1000 files, ≤6M characters; rejects exe/dll/so and
+friends; strips `.git`, `__pycache__`, `.DS_Store`, `node_modules`, `site-packages` and virtualenvs.
+It also prints the <20 KB review hint for scripts under `bin/` (advisory, not a hard limit).
+
+### Publishing the ZIP through git
+
+| Option | How | Verdict |
+| --- | --- | --- |
+| **GitHub Release asset (recommended)** | `git tag v0.1.0 && git push --tags`; `.github/workflows/skill-zip.yml` builds and uploads the zip | the binary never enters git history; each update is a new release asset |
+| Commit the zip | put it in `dist/` (already git-ignored) | possible, but every doc change adds a binary commit |
+| GitHub auto archive | `https://github.com/meeting90/podcast-knowledge-graph/archive/refs/tags/v0.1.0.zip` | contains the whole repo (Python source, tests), not a skill-only package |
+
+Upload by hand:
+
+```bash
+gh release create v0.1.0 dist/podcast-knowledge-graph-<version>.zip --generate-notes
+# or add the asset to an existing release:
+gh release upload v0.1.0 dist/podcast-knowledge-graph-<version>.zip --clobber
+```
+
+On Agensi: upload the zip → set a price → 8-point automated security scan + AI intent review + human
+review → live. Updates are a new version upload; buyers' agents fetch the current version on demand.
+
+### Versioning and releases (merge → tag → release)
+
+The version lives in three places (package metadata / `--version` / the skill's `runtime.json`).
+One script keeps them in sync:
+
+```bash
+python scripts/bump_version.py --check        # also runs in CI
+python scripts/bump_version.py patch          # 0.1.0 -> 0.1.1 (minor / major too)
+python scripts/bump_version.py --set 0.2.0
+```
+
+Recommended flow:
+
+1. Bump the version **inside the PR** (`bump_version.py …`) together with the change;
+2. Merging to `main` runs `.github/workflows/release.yml`:
+   - verifies the three files agree (fails otherwise);
+   - if `v<version>` does not exist: tags it, creates a Release and attaches the skill ZIP
+     (`--generate-notes` writes the changelog from merged PRs);
+   - if it exists: no-op, so merges that do **not** bump the version never re-release;
+3. Manual release:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0          # the skill-zip workflow creates the Release
+# or directly (zip already in dist/):
+gh release create v0.2.0 dist/podcast-knowledge-graph-<version>.zip --generate-notes
+```
+
+`gh` is just a CLI — it does not watch merges. Automation comes from Actions (`push: main`).
+The only real rule: **bump the version in the PR**, otherwise there is no new tag to release.
+
+**Release-notes grouping**: `.github/release.yml` splits changes into Features / Fixes / Documentation /
+Maintenance / Other. When the PR title uses a Conventional Commits prefix (`feat:` / `fix:` / `docs:` /
+`chore:` …, including `feat(api)!:`), `pr-label.yml` adds the matching label automatically; add the
+`skip-changelog` label to hide a PR from the notes.
+
+## Layout
 
 ```
 podcast-knowledge-graph/
 ├── package.json                  # Pi package manifest: extension + skills
-├── pyproject.toml                # Python package podcast-kg (packages from the skill's lib/)
+├── pyproject.toml                # Python package metadata (packages from the skill's lib/)
 ├── skills/podcast-knowledge-graph/   # Agent Skills folder (single source; mapped into the wheel)
 │   ├── SKILL.md                  #   triggers, steps, quality gates (Chinese; English: SKILL.en.md)
 │   ├── pointer.md                #   generic block installed into AGENTS.md / CLAUDE.md
-│   ├── runtime.json              #   version + dependency pin
-│   ├── bin/podcast-kg.py         #   launcher: runs the bundled CLI, installs deps on first use
-│   ├── bin/bootstrap.py          #   deps only: private venv + PATH shim
+│   ├── runtime.json              #   version pin
+│   ├── bin/podcast-kg.py         #   launcher: runs the bundled CLI
 │   ├── sop/SOP.md                #   extraction spec (English: SOP.en.md)
 │   ├── examples/                 #   one complete example card (JSON + Markdown)
 │   └── lib/podcast_kg/           #   the CLI itself (only copy of the Python package)

@@ -79,7 +79,7 @@ def ensure(module: str, spec: str | None = None) -> None:
             + nl
             + "  请用 skill 的启动器（会自动装到私有 venv）：python3 <skill>/bin/podcast-kg.py …"
             + nl
-            + "  或显式安装：python3 <skill>/bin/bootstrap.py"
+            + "  或让环境预装 faster-whisper（skill 不安装任何东西）"
         )
 
     if os.environ.get("PODCAST_KG_NO_AUTO_INSTALL"):

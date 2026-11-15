@@ -47,38 +47,26 @@ podcast-kg install-skill --skills-dir DIR --instructions AGENTS.md   # 不认识
 podcast-kg install-skill --target claude --verify   # 装完自检：文件 / pin / CLI 是否真的可用
 ```
 
-**CLI 随 skill 分发**（`lib/podcast_kg`），所以装上就能用；只有 `transcribe` 需要的
-`faster-whisper` / `av` 第一次运行时才装进私有 venv：
+**CLI 随 skill 分发**（`lib/podcast_kg`），装上即可用；**skill 不执行任何安装**：
 
-| 情况 | 运行时从哪来 |
-| --- | --- |
-| 文件被拷进来（marketplace / `npx skills add` / 手工解压） | 直接可用；首次 `transcribe` 自动装依赖 |
-| Pi extension 安装 | 首次会话自动准备好 venv 与依赖 |
-| 用 `podcast-kg install-skill` 装 | 用现有 CLI，并把 `lib/` 同步成同一版本 |
+| 情况 | CLI | 转写运行时 |
+| --- | --- | --- |
+| 文件被拷进来（marketplace / `npx skills add` / 手工解压） | 直接可用 | 环境需自备 `faster-whisper` |
+| Pi extension 安装 | extension 准备 venv | 随扩展装好 |
+| 用 `podcast-kg install-skill` 装 | 现有 CLI，`lib/` 同步成同一版本 | 取决于该 CLI |
 
-自愈命令（幂等；已就绪时秒回，不联网）：
+唯一入口：
 
 ```bash
-python3 <skill目录>/bin/podcast-kg.py doctor     # 首选入口：内置 CLI，缺依赖时会自动装
-python3 <skill目录>/bin/bootstrap.py             # 显式安装转写依赖（venv + PATH shim）
-python3 <skill目录>/bin/bootstrap.py --check     # 只检查，未就绪退出码 1
-python3 <skill目录>/bin/bootstrap.py --json      # ready / cli / version / pinned / action / notes
-python3 <skill目录>/bin/bootstrap.py --plan      # 报告会做什么，不动文件
-python3 <skill目录>/bin/bootstrap.py --extras none   # 只装 render/verify（离线可用，不拉 whisper）
-python3 <skill目录>/bin/bootstrap.py --models small # 装依赖 + 预取权重（486 MB）
+python3 <skill目录>/bin/podcast-kg.py doctor
+python3 <skill目录>/bin/podcast-kg.py render ep.json ep.html
 ```
 
-Windows 用 `<skill目录>\bin\bootstrap.cmd`；POSIX 也可以直接 `<skill目录>/bin/bootstrap`。
-    技能市场会把脚本**单独**拷到临时目录执行，所以以 `bootstrap.py` 为准（版本 pin 已内置，不依赖同目录文件）；两个启动器只是本地便利入口。
-
-- 装到哪：`$PODCAST_KG_HOME`（Windows `%LOCALAPPDATA%\podcast-kg`，macOS `~/Library/Application Support/podcast-kg`，Linux `~/.local/share/podcast-kg`），只在私有 venv 里，不动系统 Python；shim 写到 `$PODCAST_KG_HOME/bin`（以及存在时的 `~/.local/bin`）。
-- 装什么：内置 CLI 的版本由 `runtime.json` 的 `version` 固定；bootstrap 只安装 `deps`
-  （`faster-whisper` + `av<19`），不再安装 `podcast-kg` 包，也不依赖 PyPI。
-- 没有 Python 也能起来：有 `uv` 时用 uv 托管的 Python 3.12 建 venv；连 uv 都没有就先装 uv（`curl -LsSf https://astral.sh/uv/install.sh | sh`）。
-- 转写依赖（faster-whisper + ctranslate2）首次安装要联网、几百 MB；`render`/`verify`/`ingest`/`i18n` 无需依赖、完全离线。
-
-`podcast-kg bootstrap [--check|--plan|--json]` 是同一实现的 CLI 入口；
-`podcast-kg setup` / `unsetup` 是 `--target pi` 的旧写法。
+- `render` / `verify` / `ingest` / `i18n` / `models` / `doctor`：**零依赖、离线可用**。
+- `transcribe`：需要环境里已有 `faster-whisper`。缺了就明确报错，**不会 pip install**；
+  正确做法是让用户提供转写稿，或说明该环境需要预装运行时。
+- 内置 CLI 的版本由 `runtime.json` 的 `version` 固定；`install-skill` 会把 `lib/` 同步成安装它的 CLI 版本。
+- `podcast-kg setup` / `unsetup` 是 `--target pi` 的旧写法。
 
 ## 输入
 
@@ -167,9 +155,8 @@ extensions: { concepts: [...], corrections: [...] }
     ```
 
     如果 `podcast-kg` 恰好在 PATH 上，也可以直接用。`doctor` 显示转写依赖未安装是正常的：
-    第一次 `transcribe` / `models fetch` 会把 `faster-whisper` + `av` 装进 `$PODCAST_KG_HOME/venv`
-    （数百 MB，需联网），之后离线可用。要显式体检/预装：`<skill目录>/bin/bootstrap.py [--check|--json]`。
-    启动器都失败时，把命令和输出原样报给用户，不要凭猜测继续。
+    本 skill 不安装任何东西，`render/verify/ingest/i18n` 照常可用；只有 `transcribe` 需要环境里
+    已有 `faster-whisper`。缺了不要尝试安装，让用户提供转写稿，或说明该环境需要预装运行时。
     
 2.  **转写**  
     用 `transcribe` 子命令（参数见 `podcast-kg transcribe --help`）。得到段级时间戳的 JSON + `[mm:ss]` 全文，后续引用只认这份时间轴。长音频先切片，单片建议 ≤ 40 分钟。
@@ -279,7 +266,7 @@ extensions: { concepts: [...], corrections: [...] }
 | 关系为凑数而连 | 图谱噪声 | 宁可少连 |
 | 忽略说话者校验 | 观点张冠李戴 | 看上下文转场语 |
 | 拿逐句 claim 当阅读单位 | 读者每次只听到半句话，要连点好几次才凑出语境 | 交 `arcs`，claim 降为证据层 |
-| 没确认 `podcast-kg` 可用就开始抽取 | 干到一半才在 `transcribe` 报 command not found | 先 `doctor`，失败就跑 `bin/bootstrap.py`，再 `doctor` |
+| 没确认 `podcast-kg` 可用就开始抽取 | 干到一半才在 `transcribe` 报错 | 先 `bin/podcast-kg.py doctor`；缺运行时就要求转写稿，不要 pip install |
 | 只录嘉宾主张、丢掉主持人的提问 | 话题为什么开始、在回答什么，全丢了 | 主持人的问句进 `open_question`/`open_line` |
 | 按句子数或分组机械切弧 | 切在话题中间，听众被腰斩 | 边界只认停顿与主持人开口 |
 | 译稿改了 id / 时间戳 / 分组 | 双语切换错位、深链失效 | 只翻文字；`i18n check` 卡住结构漂移 |

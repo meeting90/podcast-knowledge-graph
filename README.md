@@ -112,26 +112,21 @@ python3 <skills-dir>/podcast-knowledge-graph/bin/podcast-kg.py install-skill --t
 
 | 安装方式 | CLI 从哪来 | 转写依赖 |
 | --- | --- | --- |
-| `npx skills` / ZIP / 手工拷贝 | skill 内的 `lib/podcast_kg`，零安装 | 首次 `transcribe` 自动装 |
+| `npx skills` / ZIP / 手工拷贝 | skill 内的 `lib/podcast_kg`，零安装 | 环境需已有 `faster-whisper` |
 | Pi extension | extension 准备私有 venv | 首次会话装齐 |
-| 自带 CLI 的 `install-skill` | 用现有 CLI，并把 `lib/` 同步成该版本 | 首次 `transcribe` 自动装 |
+| 自带 CLI 的 `install-skill` | 现有 CLI，并把 `lib/` 同步成该版本 | 取决于该 CLI |
 
 ```bash
-python3 <skill>/bin/podcast-kg.py doctor          # 首选入口：CLI 自带，缺依赖会自动装
-python3 <skill>/bin/bootstrap.py --check          # 只检查依赖/venv；未就绪退出码 1
-python3 <skill>/bin/bootstrap.py --json           # ready / vendored / deps / deps_ready / cli / notes
-python3 <skill>/bin/bootstrap.py --models small   # 装依赖 + 预取权重
+python3 <skill>/bin/podcast-kg.py doctor          # 内置 CLI，零安装
+python3 <skill>/bin/podcast-kg.py render ep.json ep.html
 ```
 
-- **内置 CLI**：`lib/podcast_kg`，版本由 `runtime.json` 的 `version` 固定；`render/verify/ingest/i18n/models`
-  不联网、不装任何包。`install-skill` 会把 `lib/` 同步成当前 CLI 的版本，避免 skill 与 CLI 漂移。
-- **只装依赖**：`runtime.json` 的 `deps`（`faster-whisper` + `av<19`）在第一次 `transcribe`
-  或 `models fetch` 时装入 `$PODCAST_KG_HOME/venv`；`bin/podcast-kg.py` 会自动切到该 venv 的 Python 运行。
-- **装到哪**：`$PODCAST_KG_HOME`（Windows `%LOCALAPPDATA%\podcast-kg`，macOS `~/Library/Application Support/podcast-kg`，
-  Linux `${XDG_DATA_HOME:-~/.local/share}/podcast-kg`），只写私有 venv + `bin/` shim（存在时也写 `~/.local/bin`）。
-- **没有 Python 也能起来**：优先用 `uv`，缺解释器时 `uv venv --python 3.12` 自动下载；连 uv 都没有会提示安装。
-- **体积与网络**：依赖首次安装数百 MB；`render/verify/i18n/ingest` 完全离线；whisper 权重另算（见下）。
-- **失败不失联**：退出码 0/1，`--json` 的 `notes` 带真实错误尾部；`PODCAST_KG_BIN` 可指定现成 CLI。
+- **内置 CLI**：`lib/podcast_kg` 是唯一源码（`pyproject.toml` 也从这里打包），版本由 `runtime.json` 固定。
+  `render/verify/ingest/i18n/models` **零依赖、离线可用**；`install-skill` 会把 `lib/` 同步成当前 CLI 的版本。
+- **转写**：`transcribe` 需要环境里已有 `faster-whisper`。skill **不安装任何东西**；缺了会明确报错，
+  应让用户提供转写稿，或说明环境需要预装运行时（Pi extension 会为 Pi 准备）。
+- **权重**：whisper 模型单独管理（见下），`models fetch` 走当前环境。
+- **范围**：没有全局 venv、没有 shim、没有 pip/PyPI 依赖；CLI 就是 skill 里的文件。
 
 ### 模型权重（whisper）为什么不内置
 
@@ -143,7 +138,7 @@ skill 被 `npx skills add` / 插件市场复制时还会被整包搬走。所以
 | 首次自动下载（默认） | 直接 `podcast-kg transcribe` | 能连 huggingface.co |
 | 预取到私有目录，之后完全离线 | `podcast-kg models fetch --model small` | 一次联网换永久离线 |
 | 共享盘 / U 盘 / 内网镜像 | `podcast-kg models fetch --model small --dir /srv/models`，再 `PODCAST_KG_MODEL_DIR=/srv/models` 或 `transcribe --model-dir /srv/models` | 多机复用、无外网 |
-| 装运行时顺便装模型 | `podcast-kg bootstrap --models small` | 一条命令一步到位 |
+| 预取模型（环境已有运行时） | `python3 <skill>/bin/podcast-kg.py models fetch --model small` | 一次联网换永久离线 |
 
 ```bash
 podcast-kg models list                    # 体积 / 状态（本地模型、HF 缓存、未下载）/ 路径
@@ -158,8 +153,7 @@ podcast-kg models path --model small      # 可用的本地路径（没有则退
 - `models fetch` 产出的目录可直接拷贝分发（HF 的符号链接会落成真实文件，`.cache` 会被清掉）；
   随包分发请走发布物/共享盘，别塞进 wheel。
 
-完整的 bootstrap 行为（解析顺序、探测逻辑、Windows 商店 python 别名）见
-[`skills/podcast-knowledge-graph/bin/README.md`](skills/podcast-knowledge-graph/bin/README.md)。
+启动器行为见 [`skills/podcast-knowledge-graph/bin/README.md`](skills/podcast-knowledge-graph/bin/README.md)。
 
 ## 使用
 
@@ -180,7 +174,6 @@ podcast-kg transcribe --help           # 再查参数 / 输入输出 / 失败语
 
 ```bash
 podcast-kg doctor                      # 环境自检（解释器 / ffmpeg / 可选依赖 / skill / runtime / 模型）
-podcast-kg bootstrap --check           # 运行时是否真的可用（未就绪退出码 1）
 podcast-kg models fetch --model small  # 预取权重，之后完全离线（不预取则首次 transcribe 下载）
 podcast-kg transcribe ep42.mp3 --model small --lang zh
 podcast-kg transcribe ep42.mp3 --words     # 额外出词级时间戳（弧的起止点要对齐到词边界时用）
@@ -201,27 +194,21 @@ podcast-kg ingest .outputs/ep42.json   # → .outputs/ep42_graph.json
 > 同一份数据还暴露了 whisper 的重复循环幻觉，现已默认关闭 `condition_on_previous_text`
 > （要旧行为加 `--carry-context`）。
 
-### 可选依赖
+### 依赖：没有需要安装的 Python 包
 
-| 子命令                                      | 依赖               | 说明       |
-| ---------------------------------------- | ---------------- | -------- |
-| `render` / `verify` / `install-skill` / `ingest` / `doctor` | **无**（纯标准库） | 离线可用 |
-| `transcribe`                             | `faster-whisper` | 首次调用自动安装 |
+| 子命令 | 依赖 |
+| --- | --- |
+| `render` / `verify` / `install-skill` / `ingest` / `i18n` / `models` / `doctor` | **无**（纯标准库，离线） |
+| `transcribe` | 环境里需要有 `faster-whisper`（本 skill **不会**安装任何东西） |
+
+`npx skills` 装完就包含全部代码（`lib/podcast_kg`）。**不需要 `pip install`，也没有单独的 Python 包要发布。**
+`transcribe` 是唯一需要外部运行时的命令：如果环境里没有 `faster-whisper`，它会明确报错并让你提供转写稿，
+而不是偷偷装包。Pi 用户由 extension 准备运行时；其他环境请自备（conda / 系统包 / 已有 venv）。
 
 > `ingest` 从 0.1.0 起不再依赖 semantica。它的 `merge_entities=True` 会按名字相似度误合并：
 > 实测把「北京大学」并进「北京师范大学」（`minsky` 并进 `zuckerberg`，两条不同 claim `c33`/`c43` 并成一个 id），
 > 每条脏数据都长得完全合法；而它宣称的 PROV-O 溯源只存在进程内存里、从未落盘。
-> 现在的实现（`skills/podcast-knowledge-graph/lib/podcast_kg/ingest_graph.py`）只按 id 去重，边做端点/自指校验，
-> 溯源直接写进 `*_graph.json` 的 `provenance[]`。
-
-
-自动安装会按当前解释器的安装方式选择 `pip` 或 `uv pip install --python <python>`（`uv tool` 的 venv 没有 pip）。想自己控制：
-
-```bash
-podcast-kg doctor --install all         # 提前装
-export PODCAST_KG_NO_AUTO_INSTALL=1     # 禁用自动安装
-uv tool install --with "faster-whisper" podcast-kg      # 转写依赖一起装
-```
+> 现在的实现只按 id 去重，边做端点/自指校验，溯源直接写进 `*_graph.json` 的 `provenance[]`。
 
 `ffmpeg` 可选：没有时转写直接用 PyAV 解码原音频。
 
@@ -230,16 +217,14 @@ uv tool install --with "faster-whisper" podcast-kg      # 转写依赖一起装
 ```bash
 git clone https://github.com/meeting90/podcast-knowledge-graph
 cd podcast-knowledge-graph
-uv venv && uv pip install -e ".[all]"
 
 pi                                       # 以项目形态加载 extension + skill
 pi -e .                                 # 或把它当成 Pi 包加载
 
-# 方式 B 的安装逻辑（不会碰你的真实 Pi 配置）
-podcast-kg setup --agent-dir /tmp/pk-agent --dry-run
-podcast-kg setup --agent-dir /tmp/pk-agent
+# 直接跑内置 CLI（不安装任何包）
+PYTHONPATH=skills/podcast-knowledge-graph/lib python -m podcast_kg doctor
 
-uv build                                 # wheel 会把 skills/ 映射成 podcast_kg/skill
+# 测试
 PYTHONPATH=skills/podcast-knowledge-graph/lib python -m unittest discover -s tests -v
 ```
 
@@ -254,7 +239,7 @@ python scripts/package_skill.py --check   # 只校验，不写文件
 python scripts/package_skill.py --json    # 文件清单 / 体积 / 字符数 / sha256
 ```
 
-ZIP 里是**完整的 skill，包括内置 CLI**（33 个文件、约 600 KB）：
+ZIP 里是**完整的 skill，包括内置 CLI**（30 个文件、约 560 KB）：
 
 ```
 podcast-knowledge-graph/
@@ -262,21 +247,19 @@ podcast-knowledge-graph/
 ├── sop/SOP.md / SOP.en.md      抽取规范（中/英）
 ├── examples/                   完整示例卡（JSON + Markdown）
 ├── bin/podcast-kg.py           启动器：直接跑内置 CLI，缺依赖时自动装
-├── bin/bootstrap.py            只装依赖（faster-whisper + av）到私有 venv
-├── bin/bootstrap / .cmd        可选启动器
 ├── lib/podcast_kg/             内置 CLI（唯一源码，含 HTML 模板/样式）
 ├── pointer.md                  写进 AGENTS.md / CLAUDE.md 的通用说明块
-└── runtime.json                版本 + 依赖清单
+└── runtime.json                版本 pin
 ```
 
 **不含** whisper 权重、缓存或虚拟环境：`render/verify/ingest/i18n/models` 装上即可离线使用；
-只有 `transcribe` 首次运行时由 `bin/bootstrap.py` 把两个依赖装进私有 venv。
+`transcribe` 需要环境里已有 `faster-whisper`（skill 不安装）。
 `lib/podcast_kg` 就是 Python 包的唯一源码（`pyproject.toml` 的打包路径指向它），
 所以既没有第二份副本，也不需要 PyPI 上单独发布的包。
 
 打包器已按 Agensi 规则检查：≤50 MB、≤1000 文件、≤600 万字符；拒绝 exe/dll/so 等可执行文件；
 自动剔除 `.git`、`__pycache__`、`.DS_Store`、`node_modules`、`site-packages`、venv。
-唯一提示：`bin/bootstrap.py` ~28 KB，略超其「脚本 <20 KB 便于人工审阅」的建议值（非硬限制）。
+打包器会对 `bin/` 下的脚本做 <20 KB 的审阅提示（非硬限制）。
 
 ### 用 git 发布 ZIP
 
@@ -299,7 +282,7 @@ Agensi 侧流程：上传 zip → 填定价 → 8 项自动安全扫描 + AI 意
 
 ### 版本管理与发布（merge 即 tag + release）
 
-版本写在 4 处（包元数据 / `--version` / skill 的 `runtime.json` / bootstrap 内置 pin），用脚本同步：
+版本写在 3 处（包元数据 / `--version` / skill 的 `runtime.json`），用脚本同步：
 
 ```bash
 python scripts/bump_version.py --check        # CI 每次都会跑
@@ -311,7 +294,7 @@ python scripts/bump_version.py --set 0.2.0
 
 1. 在 PR 里跑 `bump_version.py …`，连同代码一起提交；
 2. merge 到 `main` → `.github/workflows/release.yml` 自动执行：
-   - 校验 4 处版本一致（不一致直接失败）；
+   - 校验 3 处版本一致（不一致直接失败）；
    - 若 `v<version>` 不存在：打 tag、建 Release、附上 skill zip，`--generate-notes` 自动汇总变动的 PR；
    - 已存在：no-op，所以**没升版本号的 merge 不会重复发版**；
 3. 手动补发版：
@@ -340,7 +323,6 @@ podcast-knowledge-graph/
 │   ├── pointer.md                #   装到各家 AGENTS.md / CLAUDE.md 的通用说明块
 │   ├── runtime.json              #   版本 + 依赖清单
 │   ├── bin/podcast-kg.py         #   启动器：直接跑内置 CLI，缺依赖时自动装
-│   ├── bin/bootstrap.py          #   只装转写依赖：私有 venv + PATH shim
 │   ├── sop/SOP.md                #   抽取规范：schema、命名规则、关系类型、质检清单（英文见 SOP.en.md）
 │   ├── examples/                 #   一张完整示例卡（JSON + Markdown）
 │   └── lib/podcast_kg/           #   CLI 唯一源码（Python 包本体）

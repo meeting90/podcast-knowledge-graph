@@ -241,10 +241,9 @@ def pointer_block(skill_dir: Path) -> str:
     """The marked block: generic CLI reminder + where this skill lives."""
     body = _pointer_doc()
     location = f"技能包：`{skill_dir.as_posix()}`（处理播客 / 长视频 / 访谈前先读其中的 `SKILL.md`）。"
-    bootstrap = skill_dir / "bin" / "bootstrap.py"
     runtime = (
-        f"运行时：`python3 {bootstrap.as_posix()}`（幂等；只在 `podcast-kg` 不可用时执行，"
-        "装到私有 venv 并留 PATH shim）。"
+        f"运行时：`python3 {(skill_dir / 'bin' / 'podcast-kg.py').as_posix()}`（CLI 已内置；"
+        "只有 transcribe 需要环境里已有 faster-whisper）。"
     )
     return "\n\n".join(part for part in (body, location, runtime) if part)
 
@@ -579,7 +578,7 @@ def verify(entries: Sequence[dict]) -> list[dict]:
         seen.add(skill_dir)
 
         check((skill_dir / "SKILL.md").is_file(), "SKILL.md", str(skill_dir))
-        check((skill_dir / "bin" / "bootstrap.py").is_file(), "bin/bootstrap.py", str(skill_dir))
+        check((skill_dir / "bin" / "podcast-kg.py").is_file(), "bin/podcast-kg.py", str(skill_dir))
 
         pin_path = skill_dir / PIN_FILE
         try:

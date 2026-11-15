@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Stable entry point for the skill: `python3 bin/podcast-kg.py <args>`.
 
-The CLI ships inside the skill (`lib/podcast_kg`), so most commands need no
-installation at all. Only commands that need heavy deps (transcribe, models
-fetch) trigger a one-time install of those deps into a private venv; the
-vendored CLI is then run with that venv's Python.
+The CLI ships inside the skill (`lib/podcast_kg`), so it needs no installation.
+Commands that only use the standard library (render/verify/ingest/i18n/models/
+doctor) always work. `transcribe` additionally needs `faster-whisper` in the
+environment; if it is missing this launcher reports it and installs nothing.
 
 Exit codes are the CLI's own (0 success, 1 failure, 130 interrupted).
 """
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -21,15 +20,34 @@ HERE = Path(__file__).resolve().parent
 SKILL = HERE.parent
 LIB = SKILL / "lib"
 IS_WIN = sys.platform == "win32"
+NL = chr(10)
 
 
-def load_bootstrap():
-    """Import the sibling bootstrap.py without depending on the package name."""
-    spec = importlib.util.spec_from_file_location("_pk_bootstrap", HERE / "bootstrap.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["_pk_bootstrap"] = module  # dataclasses / introspection want this
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
+def runtime_home() -> Path:
+    override = os.environ.get("PODCAST_KG_HOME")
+    if override:
+        return Path(override).expanduser().resolve()
+    try:
+        home = Path.home()
+    except RuntimeError:  # HOME / USERPROFILE unset (containers, CI)
+        home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or os.getcwd())
+    if IS_WIN:
+        base = os.environ.get("LOCALAPPDATA") or (home / "AppData" / "Local")
+        return Path(base) / "podcast-kg"
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "podcast-kg"
+    base = os.environ.get("XDG_DATA_HOME") or (home / ".local" / "share")
+    return Path(base) / "podcast-kg"
+
+
+def venv_python(home: Path) -> Path:
+    return home / "venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
+
+
+def cli_command(cli: Path, args: list[str]) -> list[str]:
+    if IS_WIN and cli.suffix.lower() in (".cmd", ".bat"):
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", str(cli), *args]
+    return [str(cli), *args]
 
 
 def has_module(python: Path, module: str) -> bool:
@@ -42,7 +60,7 @@ def has_module(python: Path, module: str) -> bool:
 
 
 def required_module(args: list[str]) -> str | None:
-    """Only these commands pull heavy dependencies."""
+    """Only these commands need anything beyond the standard library."""
     if not args:
         return None
     if args[0] == "transcribe":
@@ -68,62 +86,36 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     args = list(sys.argv[1:] if argv is None else argv)
-    bootstrap = load_bootstrap()
-    home = bootstrap.runtime_home()
 
     # An explicit binary always wins (tests, CI, users with a custom install).
     explicit = os.environ.get("PODCAST_KG_BIN")
     if explicit and Path(explicit).is_file():
-        return subprocess.call(bootstrap.cli_command(Path(explicit), args))
+        return subprocess.call(cli_command(Path(explicit), args))
 
-    vendored = (LIB / "podcast_kg" / "cli.py").is_file()
-    if vendored:
-        python = bootstrap.venv_python(home)
-        if not python.is_file():
-            python = Path(sys.executable)
-        module = required_module(args)
-        if module and not has_module(python, module):
-            if os.environ.get("PODCAST_KG_NO_AUTO_INSTALL"):
-                print(
-                    f"缺少依赖 {module}，且 PODCAST_KG_NO_AUTO_INSTALL 已设置。\n"
-                    f"手动安装：python3 {HERE / 'bootstrap.py'}",
-                    file=sys.stderr,
-                )
-                return 1
-            print(
-                f"[podcast-kg] {args[0]} 需要额外依赖，正在一次性安装到私有 venv …",
-                file=sys.stderr,
-                flush=True,
-            )
-            code = bootstrap.main([])
-            if code != 0:
-                return code
-            python = bootstrap.venv_python(home)
-            if not has_module(python, module):
-                print(f"[podcast-kg] 依赖安装后仍无法导入 {module}", file=sys.stderr)
-                return 1
-        return run_vendored(python, args)
+    home = runtime_home()
 
-    # Older installs without lib/: find a real CLI or install the package.
-    cli = bootstrap.find_cli(home)
-    if cli is None:
-        if args and args[0] in ("-h", "--help", "--version"):
-            print(
-                "podcast-kg is not installed yet.\n"
-                "Run any command through this launcher and it installs first, e.g.:\n"
-                f"  python3 {Path(__file__).as_posix()} doctor",
-                file=sys.stderr,
-            )
-            return 0
-        print("[podcast-kg] runtime not found; installing it once …", file=sys.stderr, flush=True)
-        code = bootstrap.main([])
-        if code != 0:
-            return code
-        cli = bootstrap.find_cli(home)
-        if cli is None:
-            print("[podcast-kg] install reported success but no CLI was found", file=sys.stderr)
-            return 1
-    return subprocess.call(bootstrap.cli_command(Path(cli), args))
+    if not (LIB / "podcast_kg" / "cli.py").is_file():
+        print(
+            "This skill is incomplete: lib/podcast_kg is missing." + NL
+            + "Reinstall the skill (npx skills / unzip the release asset).",
+            file=sys.stderr,
+        )
+        return 1
+
+    python = venv_python(home)
+    if not python.is_file():
+        python = Path(sys.executable)
+    module = required_module(args)
+    if module and not has_module(python, module):
+        print(
+            f"{args[0]} needs {module}, which is not available in this environment." + NL
+            + "This skill installs nothing: provide a transcript, or use an environment that" + NL
+            + "already has faster-whisper. Everything else (render/verify/ingest/i18n/models)" + NL
+            + "works without it.",
+            file=sys.stderr,
+        )
+        return 1
+    return run_vendored(python, args)
 
 
 if __name__ == "__main__":
